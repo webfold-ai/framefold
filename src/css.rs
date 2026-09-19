@@ -880,3 +880,56 @@ mod tests {
         );
     }
 }
+
+/// Find every element matching a CSS selector, as document-order indices.
+///
+/// Indices count *all* elements in `root.descendants()` order, including
+/// `<script>` and `<style>`. Layout skips those when building boxes but still
+/// counts them, so an index means the same element on both sides — which is
+/// what lets a timeline that selected an element by CSS address the box that
+/// was laid out for it.
+pub fn query_indices(root: &Element, selector: &str) -> Vec<usize> {
+    let Some(sel) = parse_selector(selector.trim()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut path: Vec<&Element> = Vec::new();
+    let mut idx = 0usize;
+    walk_query(root, &sel, &mut path, &mut idx, &mut out);
+    out
+}
+
+fn walk_query<'a>(
+    el: &'a Element,
+    sel: &Selector,
+    path: &mut Vec<&'a Element>,
+    idx: &mut usize,
+    out: &mut Vec<usize>,
+) {
+    path.push(el);
+    let here = *idx;
+    *idx += 1;
+    if sel.matches(path) {
+        out.push(here);
+    }
+    for c in &el.children {
+        if let crate::html::Node::Element(ce) = c {
+            walk_query(ce, sel, path, idx, out);
+        }
+    }
+    path.pop();
+}
+
+/// Split a comma-separated selector list and match any of them.
+pub fn query_indices_list(root: &Element, selectors: &str) -> Vec<usize> {
+    let mut out: Vec<usize> = Vec::new();
+    for one in split_top_level(selectors, ',') {
+        for i in query_indices(root, one.trim()) {
+            if !out.contains(&i) {
+                out.push(i);
+            }
+        }
+    }
+    out.sort_unstable();
+    out
+}

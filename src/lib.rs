@@ -40,6 +40,7 @@ pub mod paint;
 pub mod raster;
 pub mod render;
 pub mod text;
+pub mod timeline;
 pub mod woff2;
 
 pub use raster::{Canvas, Path, Rect, Rgba, Transform};

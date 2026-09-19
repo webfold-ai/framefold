@@ -49,6 +49,11 @@ fn main() {
         .position(|a| a == "--scene")
         .and_then(|i| args.get(i + 1))
         .cloned();
+    let at: Option<f32> = args
+        .iter()
+        .position(|a| a == "--at")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|v| v.parse().ok());
 
     let dir = std::path::Path::new(&dir);
     let src = std::fs::read_to_string(dir.join("index.html")).expect("read index.html");
@@ -80,7 +85,19 @@ fn main() {
 
     let t = std::time::Instant::now();
     let mut canvas = Canvas::new(w, h);
-    if reveal || only.is_some() {
+    if let Some(t) = at {
+        let script = root.collect_inline_scripts();
+        // Extract against the same element layout used, or node indices disagree.
+        let tl = framefold::timeline::extract(comp, &script).expect("timeline");
+        eprintln!(
+            "timeline: {} tweens over {:.2}s{}",
+            tl.tweens.len(),
+            tl.duration,
+            if tl.uses_blur() { "  (uses blur — not yet rendered)" } else { "" }
+        );
+        let anim = framefold::timeline::FrameAnimator { timeline: &tl, time: t };
+        paint::paint(&mut canvas, &boxes, &fonts, &anim).expect("paint");
+    } else if reveal || only.is_some() {
         let scenes: Vec<String> = comp
             .children
             .iter()

@@ -43,6 +43,10 @@ pub struct Boxes {
     pub children: Vec<Boxes>,
     /// Intrinsic size measured in pass one, kept for diagnostics.
     pub intrinsic: (f32, f32),
+    /// Document-order index of the source element, matching
+    /// [`crate::css::query_indices`]. This is how a timeline addresses a box it
+    /// selected by CSS, including elements that carry no id.
+    pub node_index: usize,
     /// The width this box's text was wrapped to when it was measured, or
     /// `None` if it was measured unwrapped.
     ///
@@ -174,6 +178,7 @@ struct Pending {
     size: (f32, f32),
     /// Width the text was wrapped to during measurement, if any.
     text_wrap: Option<f32>,
+    node_index: usize,
 }
 
 impl<'a> Builder<'a> {
@@ -184,7 +189,8 @@ impl<'a> Builder<'a> {
     /// Lay out `root` into `viewport`.
     pub fn layout(&self, root: &Element, viewport: Rect) -> Result<Boxes, String> {
         let mut path = Vec::new();
-        let mut pending = self.build(root, &mut path, None, 16.0)?;
+        let mut counter = 0usize;
+        let mut pending = self.build(root, &mut path, None, 16.0, &mut counter)?;
         self.measure(&mut pending, viewport.w, viewport.h, true);
         // The root has no parent to size it, so it takes its own measured size
         // at the viewport origin. (A composition root declaring 100%/100%
@@ -200,11 +206,16 @@ impl<'a> Builder<'a> {
         path: &mut Vec<&'e Element>,
         parent: Option<&Styles>,
         parent_font_size: f32,
+        counter: &mut usize,
     ) -> Result<Pending, String> {
         // The cascade matches against an ancestor path, so it is threaded
         // through the recursion. Borrowing the tree directly keeps this safe:
         // every element outlives the layout call that reads it.
         path.push(el);
+        // Claim this element's document-order index before descending, so the
+        // numbering matches css::query_indices exactly.
+        let node_index = *counter;
+        *counter += 1;
         let styles = self.sheet.compute(path, parent);
 
         let font_size = styles
@@ -244,9 +255,12 @@ impl<'a> Builder<'a> {
         for c in &el.children {
             if let HtmlNode::Element(ce) = c {
                 if ce.tag == "script" || ce.tag == "style" {
+                    // Skipped for layout but still counted, or every index
+                    // after a <script> would be off by one.
+                    *counter += 1 + ce.descendants().len() - 1;
                     continue;
                 }
-                let child = self.build(ce, path, Some(&styles), font_size)?;
+                let child = self.build(ce, path, Some(&styles), font_size, counter)?;
                 if display_of(&ce.tag, &child.styles) != Display::None {
                     children.push(child);
                 }
@@ -264,6 +278,7 @@ impl<'a> Builder<'a> {
             children,
             size: (0.0, 0.0),
             text_wrap: None,
+            node_index,
         })
     }
 
@@ -508,6 +523,7 @@ impl<'a> Builder<'a> {
             children,
             intrinsic: n.size,
             text_wrap: n.text_wrap,
+            node_index: n.node_index,
         }
     }
 

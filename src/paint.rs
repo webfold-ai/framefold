@@ -50,6 +50,16 @@ impl Overrides {
 pub trait Animator {
     /// Overrides for the element with this id, at the current time.
     fn for_id(&self, id: Option<&str>) -> Overrides;
+
+    /// Overrides by document-order index.
+    ///
+    /// Index rather than id is the primary key because a timeline routinely
+    /// targets elements that have none — glossa animates every `<span class="w">`
+    /// of its hook, and not one of them carries an id. Defaults to the id
+    /// lookup so simple animators need only implement that.
+    fn for_node(&self, _node: usize, id: Option<&str>) -> Overrides {
+        self.for_id(id)
+    }
 }
 
 /// An animator that changes nothing — paints the composition at rest.
@@ -80,7 +90,7 @@ fn paint_box(
     offset: (f32, f32),
     clip: Option<Rect>,
 ) -> Result<(), String> {
-    let ov = animator.for_id(b.id.as_deref());
+    let ov = animator.for_node(b.node_index, b.id.as_deref());
 
     // Opacity multiplies down the tree, as CSS group opacity does.
     // An override REPLACES the element's own opacity rather than scaling it.

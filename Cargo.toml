@@ -12,6 +12,15 @@ ruler = { path = "../ruler-fix" }
 # work orthogonal to compositing, so this is the one dependency framefold takes.
 # It is isolated behind woff2::to_ttf, and ruler stays zero-dep.
 brotli = { version = "8", default-features = false, features = ["std"] }
+# Executing a composition's own timeline script. GSAP is never loaded — only a
+# recording stub — but the script itself is a real program (functions, loops,
+# DOM queries), so it must actually run. Optional: everything except timeline
+# extraction works without it.
+rquickjs = { version = "0.10", features = ["bindgen"], optional = true }
+
+[features]
+default = ["js"]
+js = ["dep:rquickjs"]
 
 [dev-dependencies]
 # Used only to prove rendered frames survive a real encoder end to end.
