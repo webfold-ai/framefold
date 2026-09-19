@@ -8,6 +8,10 @@ description = "Native compositor: HTML-style compositions to video frames, no br
 # Text layout and real TrueType outlines. framefold does the rasterizing; ruler
 # stays a layout kernel and hands back geometry, not pixels.
 ruler = { path = "../ruler-fix" }
+# WOFF2 mandates Brotli. Writing a Brotli decoder is ~2k lines of intricate spec
+# work orthogonal to compositing, so this is the one dependency framefold takes.
+# It is isolated behind woff2::to_ttf, and ruler stays zero-dep.
+brotli = { version = "8", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 # Used only to prove rendered frames survive a real encoder end to end.

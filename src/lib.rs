@@ -35,6 +35,7 @@
 pub mod raster;
 pub mod render;
 pub mod text;
+pub mod woff2;
 
 pub use raster::{Canvas, Path, Rect, Rgba, Transform};
 pub use render::{default_threads, render_frames, render_frames_parallel};
