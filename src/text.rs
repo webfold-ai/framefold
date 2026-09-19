@@ -323,3 +323,56 @@ mod tests {
         );
     }
 }
+
+/// Break a run into lines that fit `max_width`, returning each line and its width.
+///
+/// Shared by layout (which needs the height a wrapped run occupies) and paint
+/// (which needs the same lines in the same places). Measuring one way and
+/// drawing another is how text ends up overflowing the box that was sized for
+/// it, so both go through here.
+///
+/// `max_width` of `None` means never wrap — `white-space: nowrap`.
+pub fn break_lines(
+    font: &Font,
+    size: f32,
+    letter_spacing: f32,
+    text: &str,
+    max_width: Option<f32>,
+) -> Result<Vec<(String, f32)>, String> {
+    let chars: Vec<char> = text.chars().collect();
+    let width_of = |s: &str| -> f32 {
+        s.chars()
+            .map(|c| font.advance(font.glyph_id(c), size).unwrap_or(0.0) + letter_spacing)
+            .sum()
+    };
+
+    let Some(max) = max_width.filter(|w| *w > 0.0) else {
+        return Ok(vec![(text.to_string(), width_of(text))]);
+    };
+
+    let mut boxes = font.boxes(text, size)?;
+    if letter_spacing != 0.0 {
+        for b in &mut boxes {
+            b.advance += letter_spacing;
+        }
+    }
+    let ruler = Ruler::prepare(&boxes);
+    let mut out = Vec::new();
+    for line in ruler.lines(max) {
+        let lo = line.start.min(chars.len());
+        let hi = line.end.min(chars.len());
+        // Trailing whitespace at a break is not visible ink; counting it would
+        // push centred text left and make right-aligned text hang.
+        let mut end = hi;
+        while end > lo && chars[end - 1].is_whitespace() {
+            end -= 1;
+        }
+        let s: String = chars[lo..end].iter().collect();
+        let w = width_of(&s);
+        out.push((s, w));
+    }
+    if out.is_empty() {
+        out.push((String::new(), 0.0));
+    }
+    Ok(out)
+}

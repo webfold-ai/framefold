@@ -43,6 +43,14 @@ pub struct Boxes {
     pub children: Vec<Boxes>,
     /// Intrinsic size measured in pass one, kept for diagnostics.
     pub intrinsic: (f32, f32),
+    /// The width this box's text was wrapped to when it was measured, or
+    /// `None` if it was measured unwrapped.
+    ///
+    /// Paint reuses this rather than deciding again. Re-deriving it there
+    /// looks equivalent but is not: a shrink-to-fit box ends up exactly as wide
+    /// as its own unwrapped text, and re-wrapping at that same width lets float
+    /// rounding push the final word onto a second line.
+    pub text_wrap: Option<f32>,
 }
 
 impl Boxes {
@@ -110,12 +118,33 @@ fn edges(s: &Styles, prefix: &str, suffix: &str, fs: f32, basis: f32) -> Edges {
     }
 }
 
-fn display_of(s: &Styles) -> Display {
-    match s.get("display").unwrap_or("block") {
-        "none" => Display::None,
-        "flex" | "inline-flex" => Display::Flex,
-        "inline" | "inline-block" => Display::Inline,
-        _ => Display::Block,
+/// Elements whose default display is inline. HTML's user-agent stylesheet, not
+/// CSS's initial value — `display`'s initial value is `inline`, but a browser's
+/// default sheet sets most elements to `block`, and only these stay inline.
+///
+/// Defaulting everything to block stacks a line's spans vertically instead of
+/// running them along a line, which silently doubles line heights.
+const INLINE_TAGS: &[&str] = &[
+    "span", "a", "em", "strong", "b", "i", "u", "s", "small", "code", "kbd", "samp", "var",
+    "sub", "sup", "abbr", "cite", "q", "mark", "time", "label", "br", "img",
+];
+
+fn default_display(tag: &str) -> Display {
+    if INLINE_TAGS.contains(&tag) {
+        Display::Inline
+    } else {
+        Display::Block
+    }
+}
+
+fn display_of(tag: &str, s: &Styles) -> Display {
+    match s.get("display") {
+        Some("none") => Display::None,
+        Some("flex") | Some("inline-flex") => Display::Flex,
+        Some("inline") | Some("inline-block") => Display::Inline,
+        Some("block") | Some("flow-root") | Some("list-item") => Display::Block,
+        Some(_) => Display::Block,
+        None => default_display(tag),
     }
 }
 
@@ -132,6 +161,7 @@ pub struct Builder<'a> {
     fonts: &'a Fonts,
 }
 
+#[derive(Clone)]
 struct Pending {
     tag: String,
     id: Option<String>,
@@ -142,6 +172,8 @@ struct Pending {
     children: Vec<Pending>,
     /// Measured intrinsic (width, height).
     size: (f32, f32),
+    /// Width the text was wrapped to during measurement, if any.
+    text_wrap: Option<f32>,
 }
 
 impl<'a> Builder<'a> {
@@ -153,7 +185,7 @@ impl<'a> Builder<'a> {
     pub fn layout(&self, root: &Element, viewport: Rect) -> Result<Boxes, String> {
         let mut path = Vec::new();
         let mut pending = self.build(root, &mut path, None, 16.0)?;
-        self.measure(&mut pending, viewport.w, viewport.h);
+        self.measure(&mut pending, viewport.w, viewport.h, true);
         // The root has no parent to size it, so it takes its own measured size
         // at the viewport origin. (A composition root declaring 100%/100%
         // measures to the full frame; a narrower root stays narrow.)
@@ -215,7 +247,7 @@ impl<'a> Builder<'a> {
                     continue;
                 }
                 let child = self.build(ce, path, Some(&styles), font_size)?;
-                if display_of(&child.styles) != Display::None {
+                if display_of(&ce.tag, &child.styles) != Display::None {
                     children.push(child);
                 }
             }
@@ -231,11 +263,19 @@ impl<'a> Builder<'a> {
             font_size,
             children,
             size: (0.0, 0.0),
+            text_wrap: None,
         })
     }
 
     /// Pass one: intrinsic sizes, bottom-up.
-    fn measure(&self, n: &mut Pending, avail_w: f32, avail_h: f32) {
+    ///
+    /// `definite_w` says whether `avail_w` is a width the box must fit inside.
+    /// It is not always: a flex item in a column aligned to `flex-start` is
+    /// sized by its own content, so wrapping its text to the container width
+    /// would shrink it and then wrap it again against the narrower result.
+    /// Text only wraps against a definite width; otherwise it is measured at
+    /// max-content.
+    fn measure(&self, n: &mut Pending, avail_w: f32, avail_h: f32, definite_w: bool) {
         let fs = n.font_size;
         let pad = edges(&n.styles, "padding", "", fs, avail_w);
         let bord = edges(&n.styles, "border", "-width", fs, avail_w);
@@ -255,11 +295,23 @@ impl<'a> Builder<'a> {
             .unwrap_or(avail_w - pad.horizontal() - bord.horizontal() - mar.horizontal())
             .max(0.0);
 
+        // Whether each child's width is definite depends on how this box lays
+        // children out.
+        let self_display = display_of(&n.tag, &n.styles);
+        let child_definite = match self_display {
+            // Row items are sized along the main axis by flex distribution,
+            // which has not happened yet — they are re-measured in place_flex
+            // once their share is known.
+            Display::Flex if direction_of(&n.styles) == Dir::Row => false,
+            // Column items span the cross axis only when stretched.
+            Display::Flex => n.styles.get("align-items").unwrap_or("stretch") == "stretch",
+            _ => definite_w || explicit_w.is_some() || inset_w.is_some(),
+        };
         for c in &mut n.children {
-            self.measure(c, inner_avail_w, avail_h);
+            self.measure(c, inner_avail_w, avail_h, child_definite);
         }
 
-        let display = display_of(&n.styles);
+        let display = self_display;
         let (mut content_w, mut content_h) = match display {
             Display::None => (0.0, 0.0),
             Display::Flex => self.flex_intrinsic(n, inner_avail_w),
@@ -270,7 +322,7 @@ impl<'a> Builder<'a> {
                 let inline_children = n
                     .children
                     .iter()
-                    .all(|c| display_of(&c.styles) == Display::Inline);
+                    .all(|c| display_of(&c.tag, &c.styles) == Display::Inline);
                 if !n.children.is_empty() && inline_children {
                     // One inline run: widths add, height is the tallest.
                     w = n.children.iter().map(|c| c.size.0).sum();
@@ -290,9 +342,17 @@ impl<'a> Builder<'a> {
             }
         };
 
-        // Text contributes its measured run.
+        // Text contributes its measured run, wrapped to the available width
+        // unless `white-space: nowrap` forbids it.
         if let Some(t) = &n.text {
-            let (tw, th) = self.measure_text(n, t);
+            let text_avail = if definite_w || explicit_w.is_some() || inset_w.is_some() {
+                inner_avail_w
+            } else {
+                f32::INFINITY
+            };
+            let t = t.clone();
+            let (tw, th, wrap) = self.measure_text(n, &t, text_avail);
+            n.text_wrap = wrap;
             content_w = content_w.max(tw);
             content_h = content_h.max(th);
         }
@@ -349,25 +409,18 @@ impl<'a> Builder<'a> {
     }
 
     /// Measure a text run on one line.
-    fn measure_text(&self, n: &Pending, text: &str) -> (f32, f32) {
+    fn measure_text(&self, n: &Pending, text: &str, avail_w: f32) -> (f32, f32, Option<f32>) {
         let family = n.styles.get("font-family").unwrap_or("sans-serif");
         let weight = weight_value(n.styles.get("font-weight"));
         let Some(font) = self.fonts.resolve(family, weight) else {
-            return (0.0, n.font_size * 1.2);
+            return (0.0, n.font_size * 1.2, None);
         };
         let ls = n
             .styles
             .get("letter-spacing")
             .and_then(|v| length(v, n.font_size, 0.0))
             .unwrap_or(0.0);
-        let mut w = 0.0;
-        for ch in text.chars() {
-            w += font
-                .advance(font.glyph_id(ch), n.font_size)
-                .unwrap_or(0.0)
-                + ls;
-        }
-        let lh = n
+        let lh_first = n
             .styles
             .get("line-height")
             .and_then(|v| {
@@ -379,7 +432,24 @@ impl<'a> Builder<'a> {
                     .or_else(|| length(v, n.font_size, n.font_size))
             })
             .unwrap_or(n.font_size * 1.2);
-        (w, lh)
+
+        // A run that may wrap is measured as the lines it actually becomes:
+        // its width is the widest line and its height is line-count * leading.
+        // Measuring the unwrapped width instead sizes the box for one long
+        // line, and the text then overflows into whatever sits beside it.
+        let nowrap = matches!(
+            n.styles.get("white-space"),
+            Some("nowrap") | Some("pre")
+        );
+        let max = if nowrap || !avail_w.is_finite() {
+            None
+        } else {
+            Some(avail_w)
+        };
+        let lines = crate::text::break_lines(font, n.font_size, ls, text, max)
+            .unwrap_or_else(|_| vec![(text.to_string(), 0.0)]);
+        let w = lines.iter().map(|(_, w)| *w).fold(0.0, f32::max);
+        (w, lh_first * lines.len() as f32, max)
     }
 
     /// Pass two: assign rectangles, top-down.
@@ -421,7 +491,7 @@ impl<'a> Builder<'a> {
         );
         let _ = border_box;
 
-        let children = match display_of(&n.styles) {
+        let children = match display_of(&n.tag, &n.styles) {
             Display::Flex => self.place_flex(n, content, viewport),
             _ => self.place_block(n, content, viewport),
         };
@@ -437,6 +507,7 @@ impl<'a> Builder<'a> {
             font_size: n.font_size,
             children,
             intrinsic: n.size,
+            text_wrap: n.text_wrap,
         }
     }
 
@@ -447,7 +518,7 @@ impl<'a> Builder<'a> {
         let inline_run = !n.children.is_empty()
             && n.children
                 .iter()
-                .all(|c| display_of(&c.styles) == Display::Inline);
+                .all(|c| display_of(&c.tag, &c.styles) == Display::Inline);
 
         for c in &n.children {
             if matches!(c.styles.get("position"), Some("absolute") | Some("fixed")) {
@@ -577,14 +648,29 @@ impl<'a> Builder<'a> {
             let cm = edges(&c.styles, "margin", "", c.font_size, content.w);
             let m = mains[flow_i];
 
-            let (cross_size, container_cross) = match dir {
-                Dir::Row => (c.size.1, content.h),
-                Dir::Column => (c.size.0, content.w),
-            };
             // `stretch` only applies when the item has no explicit cross size.
             let explicit_cross = match dir {
                 Dir::Row => c.styles.get("height").is_some(),
                 Dir::Column => c.styles.get("width").is_some(),
+            };
+
+            // Re-measure with the size flex just decided. A row item's width
+            // is only known after distribution, so its first measurement used
+            // the container's width — text that wraps would otherwise be
+            // measured for one line and painted as two, and the box would not
+            // grow to hold it.
+            let mut resized;
+            let child: &Pending = if matches!(dir, Dir::Row) && (m - c.size.0).abs() > 0.5 {
+                resized = (*c).clone();
+                self.measure(&mut resized, m, content.h, true);
+                &resized
+            } else {
+                c
+            };
+
+            let (cross_size, container_cross) = match dir {
+                Dir::Row => (child.size.1, content.h),
+                Dir::Column => (child.size.0, content.w),
             };
             let stretched = align == "stretch" && !explicit_cross;
             let cross = if stretched { container_cross } else { cross_size };
@@ -608,7 +694,7 @@ impl<'a> Builder<'a> {
                     m,
                 ),
             };
-            out.push(self.place(c, slot, viewport));
+            out.push(self.place(child, slot, viewport));
 
             cursor += m + main_gap + between;
             flow_i += 1;

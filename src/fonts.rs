@@ -117,6 +117,39 @@ impl Fonts {
     pub fn is_empty(&self) -> bool {
         self.loaded.is_empty() && self.fallback.is_none()
     }
+
+    /// Resolve the font that should actually draw `ch`.
+    ///
+    /// Web fonts are usually subsetted — glossa's Space Mono carries Latin and
+    /// nothing else — so a character like U+2713 CHECK MARK maps to glyph 0
+    /// (.notdef) and would paint as a tofu box. A browser silently falls back
+    /// to another installed family for exactly these characters, per-glyph
+    /// rather than per-run, so matching its output requires doing the same.
+    ///
+    /// Returns the primary font when it has the glyph, otherwise the first
+    /// font that does, otherwise the primary so the caller still draws
+    /// something rather than nothing.
+    pub fn resolve_for_char(&self, family_stack: &str, weight: f32, ch: char) -> Option<&Font> {
+        let primary = self.resolve(family_stack, weight)?;
+        if primary.glyph_id(ch) != 0 || ch == '\u{0}' {
+            return Some(primary);
+        }
+        // Whitespace has no outline by design; never treat it as missing.
+        if ch.is_whitespace() {
+            return Some(primary);
+        }
+        for l in &self.loaded {
+            if l.font.glyph_id(ch) != 0 {
+                return Some(&l.font);
+            }
+        }
+        if let Some(f) = &self.fallback {
+            if f.glyph_id(ch) != 0 {
+                return Some(f);
+            }
+        }
+        Some(primary)
+    }
 }
 
 /// Does a `font-weight` descriptor like "300 700" cover `weight`?

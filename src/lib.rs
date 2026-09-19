@@ -36,6 +36,7 @@ pub mod css;
 pub mod fonts;
 pub mod html;
 pub mod layout;
+pub mod paint;
 pub mod raster;
 pub mod render;
 pub mod text;
