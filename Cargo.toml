@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2021"
 description = "Native compositor: HTML-style compositions to video frames, no browser"
 
+# The renderer as a binary, so a host can run it out-of-process. A 1080p render
+# is CPU-heavy and memory-heavy; isolating it means a failure costs one job
+# rather than the server around it.
+[[bin]]
+name = "framefold"
+path = "src/bin/framefold.rs"
+
 [dependencies]
 # Text layout and real TrueType outlines. framefold does the rasterizing; ruler
 # stays a layout kernel and hands back geometry, not pixels.
@@ -17,14 +24,15 @@ brotli = { version = "8", default-features = false, features = ["std"] }
 # DOM queries), so it must actually run. Optional: everything except timeline
 # extraction works without it.
 rquickjs = { version = "0.10", features = ["bindgen"], optional = true }
+# Encoding and muxing. A real dependency rather than dev-only, now that the
+# renderer ships as a runnable binary and not just a library plus tests.
+transcode = { path = "../transcode", version = "0.2" }
 
 [features]
 default = ["js"]
 js = ["dep:rquickjs"]
 
 [dev-dependencies]
-# Used only to prove rendered frames survive a real encoder end to end.
-transcode = { path = "../transcode" }
 
 [profile.release]
 opt-level = 3

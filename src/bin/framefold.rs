@@ -1,20 +1,53 @@
-//! Render a whole composition to an .mp4 — the end-to-end job.
+//! framefold — render an HTML composition to video, with no browser.
 //!
-//!     cargo run --release --example render -- <composition-dir> <out.mp4> [--fps N]
+//!     framefold render <composition-dir> <out.mp4> [--fps N] [--seconds N]
+//!                      [--threads N] [--memory-mb N]
+//!     framefold probe  <composition-dir>
 //!
-//! No browser, no Node, no ffmpeg: parse, cascade, lay out, run the
-//! composition's own timeline script, rasterize every frame in parallel, and
-//! encode H.264 through transcode.
+//! `probe` reports what the composition declares and how many frames it will
+//! cost, without rendering anything. A host needs that to price and schedule a
+//! job before committing to the work, and it is cheap: parsing and planning
+//! touch no pixels.
+//!
+//! Progress is written to stderr as one line per completed percent, so a
+//! supervising process can follow a long render without parsing the renderer's
+//! internals.
 
 use framefold::{css, fonts::Fonts, html, layout, paint, timeline, Canvas, Rect};
 
+fn usage() -> ! {
+    eprintln!(
+        "usage:\n  framefold render <composition-dir> <out.mp4> [--fps N] [--seconds N] \\\n\
+         \t[--threads N] [--memory-mb N]\n  framefold probe <composition-dir>"
+    );
+    std::process::exit(2)
+}
+
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let Some(dir) = args.first().cloned() else {
-        eprintln!("usage: render <composition-dir> <out.mp4> [--fps N] [--seconds N]");
-        std::process::exit(2);
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // Accept a bare directory for backwards compatibility with the example
+    // this grew out of; `render` is the explicit form.
+    let cmd = match args.first().map(|s| s.as_str()) {
+        Some("render") => {
+            args.remove(0);
+            "render"
+        }
+        Some("probe") => {
+            args.remove(0);
+            "probe"
+        }
+        Some(_) => "render",
+        None => usage(),
     };
-    let out = args.get(1).cloned().unwrap_or_else(|| "out.mp4".into());
+    let Some(dir) = args.first().cloned() else { usage() };
+    let out = if cmd == "probe" {
+        String::new()
+    } else {
+        match args.get(1) {
+            Some(o) if !o.starts_with("--") => o.clone(),
+            _ => usage(),
+        }
+    };
     let flag = |name: &str| -> Option<f32> {
         args.iter()
             .position(|a| a == name)
@@ -58,11 +91,13 @@ fn main() {
         .expect("layout");
 
     let tl = timeline::extract(comp, &root.collect_inline_scripts()).expect("timeline");
-    eprintln!(
-        "{w}x{h} {fps}fps {seconds}s · {} tweens over {:.2}s",
-        tl.tweens.len(),
-        tl.duration
-    );
+    if cmd != "probe" {
+        eprintln!(
+            "{w}x{h} {fps}fps {seconds}s · {} tweens over {:.2}s",
+            tl.tweens.len(),
+            tl.duration
+        );
+    }
 
     let total = (seconds * fps).round() as usize;
     let threads = std::env::var("FRAMEFOLD_THREADS")
@@ -83,6 +118,23 @@ fn main() {
     // repeats are neither rendered nor encoded: they become all-skip P-frames,
     // which cost a handful of bytes and no pixels.
     let plan = tl.plan(total, fps);
+
+    if cmd == "probe" {
+        // One JSON line on stdout: a host parses this to price and schedule the
+        // job. `frames` is the billable quantity — what the composition
+        // declares — and `frames_drawn` is what the renderer will actually do.
+        // They differ because repeats collapse, and a caller should never be
+        // billed on an implementation detail they cannot predict.
+        println!(
+            "{{\"width\":{w},\"height\":{h},\"fps\":{fps},\"duration\":{seconds},\
+             \"frames\":{total},\"frames_drawn\":{},\"tweens\":{},\"uses_blur\":{}}}",
+            plan.distinct(),
+            tl.tweens.len(),
+            tl.uses_blur()
+        );
+        return;
+    }
+
     eprintln!(
         "{w}x{h} {fps}fps {seconds}s · {} tweens · {threads} threads",
         tl.tweens.len()
@@ -103,6 +155,7 @@ fn main() {
                 time: plan.distinct_times[k],
             };
             paint::paint(canvas, &boxes, &fonts, &anim).expect("paint");
+            report_progress(k, plan.distinct());
             transcode::h264_inter::encode_idr_sample(
                 &canvas.data,
                 w,
@@ -153,4 +206,29 @@ fn main() {
         (render_time + encode_time).as_secs_f64(),
         encoded as f64 / 1_048_576.0
     );
+}
+
+
+/// Report progress on stderr, once per whole percent.
+///
+/// A render takes tens of seconds and a supervising process needs to know it is
+/// alive. Once per percent rather than per frame so the output stays readable
+/// and a slow pipe cannot throttle the renderer.
+fn report_progress(done_index: usize, total: usize) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static DONE: AtomicUsize = AtomicUsize::new(0);
+    static LAST_PCT: AtomicUsize = AtomicUsize::new(usize::MAX);
+    let _ = done_index;
+    let n = DONE.fetch_add(1, Ordering::Relaxed) + 1;
+    let pct = n * 100 / total.max(1);
+    // Only the worker that crosses into a new percent prints it, so concurrent
+    // workers do not each announce the same number.
+    if LAST_PCT
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |p| {
+            (p == usize::MAX || pct > p).then_some(pct)
+        })
+        .is_ok()
+    {
+        eprintln!("progress {pct} {n}/{total}");
+    }
 }
