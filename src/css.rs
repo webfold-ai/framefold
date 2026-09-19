@@ -357,8 +357,36 @@ fn expand_into(out: &mut HashMap<String, String>, prop: &str, value: &str) {
             }
         }
         "flex" => {
-            // `flex: 1` is the only form compositions use.
-            out.insert("flex-grow".into(), value.clone());
+            // `flex: 1` expands to `1 1 0%` — note the basis is ZERO, not the
+            // item's content size. Growing from content width instead makes
+            // three text-filled cards each keep their own width and overflow
+            // the row, which is a silent and very visible layout bug.
+            let parts: Vec<&str> = value.split_whitespace().collect();
+            match parts.len() {
+                1 if parts[0].parse::<f32>().is_ok() => {
+                    out.insert("flex-grow".into(), parts[0].to_string());
+                    out.insert("flex-shrink".into(), "1".into());
+                    out.insert("flex-basis".into(), "0".into());
+                }
+                1 => {
+                    // A single non-numeric value is a basis, e.g. `flex: auto`.
+                    out.insert("flex-basis".into(), parts[0].to_string());
+                }
+                2 => {
+                    out.insert("flex-grow".into(), parts[0].to_string());
+                    if parts[1].parse::<f32>().is_ok() {
+                        out.insert("flex-shrink".into(), parts[1].to_string());
+                        out.insert("flex-basis".into(), "0".into());
+                    } else {
+                        out.insert("flex-basis".into(), parts[1].to_string());
+                    }
+                }
+                _ => {
+                    out.insert("flex-grow".into(), parts[0].to_string());
+                    out.insert("flex-shrink".into(), parts[1].to_string());
+                    out.insert("flex-basis".into(), parts[2].to_string());
+                }
+            }
             out.insert("flex".into(), value);
         }
         "font" => {

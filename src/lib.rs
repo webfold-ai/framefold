@@ -33,7 +33,9 @@
 //! this crate draws what it is told to draw.
 
 pub mod css;
+pub mod fonts;
 pub mod html;
+pub mod layout;
 pub mod raster;
 pub mod render;
 pub mod text;
