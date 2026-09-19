@@ -15,7 +15,7 @@
 
 use crate::css::length;
 use crate::layout::Boxes;
-use crate::raster::{Canvas, Path, Rect, Rgba};
+use crate::raster::{Canvas, Rect, Rgba};
 use crate::fonts::{weight_value, Fonts};
 
 /// Per-element visual overrides applied at paint time.
@@ -35,6 +35,8 @@ pub struct Overrides {
     /// `clip-path: inset(top right bottom left)` as fractions of the box,
     /// matching the CSS percentage form compositions use for wipe reveals.
     pub inset_clip: Option<(f32, f32, f32, f32)>,
+    /// `filter: blur(Npx)` in pixels.
+    pub blur: Option<f32>,
 }
 
 impl Overrides {
@@ -43,6 +45,7 @@ impl Overrides {
             && self.translate == (0.0, 0.0)
             && self.scale.is_none()
             && self.inset_clip.is_none()
+            && self.blur.is_none()
     }
 }
 
@@ -71,6 +74,77 @@ impl Animator for Static {
     }
 }
 
+thread_local! {
+    /// Scratch layers, reused across frames on this worker. Nested blurs each
+    /// take one, so the pool holds as many as the deepest nesting reached.
+    static LAYERS: std::cell::RefCell<Vec<Canvas>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Take a cleared full-frame layer from this thread's pool.
+fn take_layer(width: u32, height: u32) -> Canvas {
+    LAYERS.with(|p| {
+        let mut p = p.borrow_mut();
+        while let Some(mut c) = p.pop() {
+            if c.width == width && c.height == height {
+                // Clearing costs a memset; allocating costs a memset plus a
+                // page-fault storm on first touch.
+                c.data.fill(0);
+                return c;
+            }
+            // A layer for different dimensions is dropped rather than resized:
+            // frame size does not change mid-render, so this happens once.
+        }
+        Canvas::new(width, height)
+    })
+}
+
+/// Return a layer for reuse.
+fn give_layer(c: Canvas) {
+    LAYERS.with(|p| {
+        let mut p = p.borrow_mut();
+        // Bounded so a pathological composition cannot grow the pool without
+        // limit; beyond this the layer is simply dropped.
+        //
+        // The layer is deliberately NOT released between frames. Freeing and
+        // reallocating an 8.3 MB buffer per frame churns large blocks through
+        // the allocator, and resident memory tracks the arena high-water mark
+        // rather than live bytes — measured, that raised peak RSS from 112 MB to
+        // 283 MB at four threads. Holding one idle layer per worker is cheaper
+        // than repeatedly proving we do not need it.
+        if p.len() < 2 {
+            p.push(c);
+        }
+    })
+}
+
+/// Release this thread's pooled layers.
+pub fn release_layers() {
+    LAYERS.with(|p| p.borrow_mut().clear());
+}
+
+/// Forwards to an inner animator but substitutes one node's overrides.
+///
+/// Used to re-enter painting for a blurred subtree without recursing forever:
+/// the second pass sees the same overrides minus the blur.
+struct OverrideOnce<'a> {
+    inner: &'a dyn Animator,
+    node: usize,
+    with: Overrides,
+}
+
+impl Animator for OverrideOnce<'_> {
+    fn for_id(&self, id: Option<&str>) -> Overrides {
+        self.inner.for_id(id)
+    }
+    fn for_node(&self, node: usize, id: Option<&str>) -> Overrides {
+        if node == self.node {
+            self.with.clone()
+        } else {
+            self.inner.for_node(node, id)
+        }
+    }
+}
+
 /// Paint a whole box tree.
 pub fn paint(
     canvas: &mut Canvas,
@@ -78,8 +152,85 @@ pub fn paint(
     fonts: &Fonts,
     animator: &dyn Animator,
 ) -> Result<(), String> {
-    paint_box(canvas, root, fonts, animator, 1.0, (0.0, 0.0), None)
+    paint_box(canvas, root, fonts, animator, 1.0, (0.0, 0.0), None, Xform::IDENTITY)
 }
+
+/// An accumulated uniform scale about a fixed origin.
+///
+/// A CSS transform applies to an element *and its whole subtree* — scaling a
+/// card scales its text with it. Scaling only the element's own rectangle
+/// leaves the contents at their original size, which reads as "nothing
+/// happened" for a slow camera push-in and is wrong in a way that is easy to
+/// miss frame by frame and obvious in a diff.
+#[derive(Clone, Copy, Debug)]
+pub struct Xform {
+    pub scale: f32,
+    pub origin: (f32, f32),
+}
+
+impl Xform {
+    pub const IDENTITY: Xform = Xform {
+        scale: 1.0,
+        origin: (0.0, 0.0),
+    };
+
+    fn is_identity(&self) -> bool {
+        (self.scale - 1.0).abs() < 1e-4
+    }
+
+    fn point(&self, x: f32, y: f32) -> (f32, f32) {
+        (
+            self.origin.0 + (x - self.origin.0) * self.scale,
+            self.origin.1 + (y - self.origin.1) * self.scale,
+        )
+    }
+
+    fn rect(&self, r: Rect) -> Rect {
+        let (x, y) = self.point(r.x, r.y);
+        Rect::new(x, y, r.w * self.scale, r.h * self.scale)
+    }
+
+    /// Compose an additional scale about `origin`, given in the coordinate
+    /// space this transform already produces.
+    ///
+    /// Two uniform scales about different origins compose to a single uniform
+    /// scale, so the pair collapses into one transform instead of needing a
+    /// matrix stack. With `T1(p) = o1 + (p - o1)·s1` and `T2(q) = o2 + (q - o2)·s2`:
+    ///
+    /// ```text
+    /// T2(T1(p)) = o2 + (o1 - o2)·s2 + (p - o1)·s1·s2
+    ///           = o·(1 - S) + p·S          where S = s1·s2
+    ///   =>  o   = [o2 + (o1 - o2)·s2 - o1·S] / (1 - S)
+    /// ```
+    ///
+    /// `S == 1` means the two scales cancel, leaving a pure translation that a
+    /// scale-about-origin cannot express; the origin is then irrelevant.
+    fn then_scale(&self, scale: f32, origin: (f32, f32)) -> Xform {
+        if (scale - 1.0).abs() < 1e-4 {
+            return *self;
+        }
+        let total = self.scale * scale;
+        let denom = 1.0 - total;
+        if denom.abs() < 1e-6 {
+            return Xform {
+                scale: total,
+                origin: self.origin,
+            };
+        }
+        let solve = |o1: f32, o2: f32| {
+            (o2 + (o1 - o2) * scale - o1 * total) / denom
+        };
+        Xform {
+            scale: total,
+            origin: (
+                solve(self.origin.0, origin.0),
+                solve(self.origin.1, origin.1),
+            ),
+        }
+    }
+}
+
+/// Paint a whole box tree.
 
 fn paint_box(
     canvas: &mut Canvas,
@@ -89,8 +240,60 @@ fn paint_box(
     inherited_alpha: f32,
     offset: (f32, f32),
     clip: Option<Rect>,
+    xform: Xform,
 ) -> Result<(), String> {
     let ov = animator.for_node(b.node_index, b.id.as_deref());
+
+    // A blur applies to the element and everything inside it, so the subtree is
+    // drawn into its own transparent layer, blurred, and composited back. CSS
+    // filters work on the rendered result, not on each shape: blurring shapes
+    // individually would let their soft edges show through one another instead
+    // of blurring the composed image.
+    if let Some(radius) = ov.blur.filter(|r| *r > 0.5) {
+        // Borrow a scratch layer instead of allocating one.
+        //
+        // A blurred element needs a full-frame transparent layer, and a naive
+        // `Canvas::new` here costs 8.3 MB at 1080p for every blurred element on
+        // every frame — multiplied by the number of render threads, since each
+        // is doing this at the same time. Layers are pooled per thread and
+        // returned when the subtree finishes, so the cost is paid once per
+        // worker per nesting depth.
+        let mut layer = take_layer(canvas.width, canvas.height);
+        // The layer covers the whole canvas so coordinates stay absolute, but
+        // only the element's own area plus the blur's reach can contain ink,
+        // and blurring/compositing outside that is wasted work on a 1080p frame.
+        let reach = radius * 3.0 + 2.0;
+        let touched = Rect::new(
+            b.rect.x + offset.0 - reach,
+            b.rect.y + offset.1 - reach,
+            b.rect.w + reach * 2.0,
+            b.rect.h + reach * 2.0,
+        );
+        let blur_clip = Some(match clip {
+            Some(c) => c.intersect(&touched),
+            None => touched.intersect(&canvas.bounds()),
+        });
+        let mut inner = ov.clone();
+        inner.blur = None;
+        paint_box(
+            &mut layer,
+            b,
+            fonts,
+            &OverrideOnce {
+                inner: animator,
+                node: b.node_index,
+                with: inner,
+            },
+            inherited_alpha,
+            offset,
+            clip,
+            xform,
+        )?;
+        crate::raster::blur_region(&mut layer, radius, blur_clip);
+        crate::raster::composite(canvas, &layer, 1.0, blur_clip);
+        give_layer(layer);
+        return Ok(());
+    }
 
     // Opacity multiplies down the tree, as CSS group opacity does.
     // An override REPLACES the element's own opacity rather than scaling it.
@@ -114,27 +317,25 @@ fn paint_box(
     }
 
     let offset = (offset.0 + ov.translate.0, offset.1 + ov.translate.1);
-    let rect = Rect::new(
+    let untransformed = Rect::new(
         b.rect.x + offset.0,
         b.rect.y + offset.1,
         b.rect.w,
         b.rect.h,
     );
 
-    // A scale is applied about the element's transform-origin, so a card that
-    // grows does so from its own anchor rather than the frame's corner.
-    let rect = match ov.scale {
-        None => rect,
+    // A scale applies about the element's transform-origin and then carries
+    // into the subtree, so it is accumulated rather than applied to this box
+    // alone.
+    let xform = match ov.scale {
+        None => xform,
         Some(s) => {
-            let (ox, oy) = transform_origin(b, rect);
-            Rect::new(
-                ox + (rect.x - ox) * s,
-                oy + (rect.y - oy) * s,
-                rect.w * s,
-                rect.h * s,
-            )
+            let base = xform.rect(untransformed);
+            let origin = transform_origin(b, base);
+            xform.then_scale(s, origin)
         }
     };
+    let rect = xform.rect(untransformed);
 
     // Clipping accumulates: a child can only narrow what its parent allowed.
     let mut clip = clip;
@@ -179,12 +380,12 @@ fn paint_box(
     // Text.
     if let Some(text) = &b.text {
         if !text.trim().is_empty() {
-            paint_text(canvas, b, text, rect, fonts, alpha, clip)?;
+            paint_text(canvas, b, text, rect, fonts, alpha, clip, xform)?;
         }
     }
 
     for child in &b.children {
-        paint_box(canvas, child, fonts, animator, alpha, offset, clip)?;
+        paint_box(canvas, child, fonts, animator, alpha, offset, clip, xform)?;
     }
     Ok(())
 }
@@ -230,6 +431,7 @@ fn paint_text(
     fonts: &Fonts,
     alpha: f32,
     clip: Option<Rect>,
+    xform: Xform,
 ) -> Result<(), String> {
     let family = b.styles.get("font-family").unwrap_or("sans-serif");
     let weight = weight_value(b.styles.get("font-weight"));
@@ -239,12 +441,14 @@ fn paint_text(
         return Ok(());
     };
     let color = b.styles.color("color").unwrap_or(Rgba::BLACK);
-    let size = b.font_size;
+    // Type scales with the element, which is the whole point of a push-in.
+    let size = b.font_size * xform.scale;
     let letter_spacing = b
         .styles
         .get("letter-spacing")
-        .and_then(|v| length(v, size, 0.0))
-        .unwrap_or(0.0);
+        .and_then(|v| length(v, b.font_size, 0.0))
+        .unwrap_or(0.0)
+        * xform.scale;
 
     let line_height = b
         .styles
@@ -253,24 +457,33 @@ fn paint_text(
             v.trim()
                 .parse::<f32>()
                 .ok()
-                .map(|m| m * size)
-                .or_else(|| length(v, size, size))
+                .map(|m| m * b.font_size)
+                .or_else(|| length(v, b.font_size, b.font_size))
         })
-        .unwrap_or(size * 1.2);
+        .unwrap_or(b.font_size * 1.2)
+        * xform.scale;
 
     // Baseline = top + half-leading + ascent.
     let ascent = font.ascent(size);
     let descent = font.descent(size);
     let half_leading = (line_height - (ascent + descent)) / 2.0;
-    let content_top = rect.y + (b.content.y - b.rect.y);
+    let content_top = rect.y + (b.content.y - b.rect.y) * xform.scale;
     let baseline = content_top + half_leading + ascent;
 
-    let content_x = rect.x + (b.content.x - b.rect.x);
-    let content_w = b.content.w;
+    let content_x = rect.x + (b.content.x - b.rect.x) * xform.scale;
+    let content_w = b.content.w * xform.scale;
 
     // Wrap to exactly the width layout used. Recomputing it here would look
     // equivalent and is not — see Boxes::text_wrap.
-    let lines = crate::text::break_lines(font, size, letter_spacing, text, b.text_wrap)?;
+    // Wrap at the layout width scaled to match, so a scaled box breaks its
+    // text in the same places rather than re-flowing as it grows.
+    let lines = crate::text::break_lines(
+        font,
+        size,
+        letter_spacing,
+        text,
+        b.text_wrap.map(|w| w * xform.scale),
+    )?;
 
     let align = b.styles.get("text-align").unwrap_or("left");
     for (i, (line, width)) in lines.iter().enumerate() {
@@ -286,12 +499,7 @@ fn paint_text(
             // symbols the composition uses, and drawing .notdef paints a tofu box.
             let f = fonts.resolve_for_char(family, weight, ch).unwrap_or(font);
             let gid = f.glyph_id(ch);
-            let contours = f.outline(gid)?;
-            if !contours.is_empty() {
-                let scale = size / f.units_per_em() as f32;
-                let path = Path::from_glyph(&contours, scale, pen, y);
-                canvas.fill_path(&path, color, alpha, clip);
-            }
+            crate::glyphcache::draw_glyph(canvas, f, gid, size, pen, y, color, alpha, clip)?;
             pen += f.advance(gid, size)? + letter_spacing;
         }
     }
@@ -571,5 +779,60 @@ mod tests {
             .filter(|p| p[0] == 27 && p[1] == 27 && p[2] == 31)
             .count();
         assert_eq!(outro_bg, 0, "the hidden outro background leaked into frame 0");
+    }
+}
+
+#[cfg(test)]
+mod xform_tests {
+    use super::*;
+
+    fn approx(a: (f32, f32), b: (f32, f32)) {
+        assert!(
+            (a.0 - b.0).abs() < 0.01 && (a.1 - b.1).abs() < 0.01,
+            "{a:?} != {b:?}"
+        );
+    }
+
+    #[test]
+    fn identity_leaves_points_alone() {
+        approx(Xform::IDENTITY.point(37.0, 91.0), (37.0, 91.0));
+    }
+
+    #[test]
+    fn a_single_scale_fixes_its_origin() {
+        let x = Xform::IDENTITY.then_scale(2.0, (100.0, 100.0));
+        approx(x.point(100.0, 100.0), (100.0, 100.0));
+        approx(x.point(110.0, 100.0), (120.0, 100.0));
+    }
+
+    #[test]
+    fn nested_scales_compose_like_applying_them_in_turn() {
+        // Compose, then compare against applying each in sequence by hand.
+        let s1 = 1.035;
+        let o1 = (300.0, 400.0);
+        let s2 = 1.04;
+        let o2 = (960.0, 540.0);
+
+        let composed = Xform::IDENTITY.then_scale(s1, o1).then_scale(s2, o2);
+        for p in [(0.0, 0.0), (500.0, 250.0), (1920.0, 1080.0)] {
+            let a = (o1.0 + (p.0 - o1.0) * s1, o1.1 + (p.1 - o1.1) * s1);
+            let b = (o2.0 + (a.0 - o2.0) * s2, o2.1 + (a.1 - o2.1) * s2);
+            approx(composed.point(p.0, p.1), b);
+        }
+        assert!((composed.scale - s1 * s2).abs() < 1e-5);
+    }
+
+    #[test]
+    fn cancelling_scales_do_not_divide_by_zero() {
+        let x = Xform::IDENTITY.then_scale(2.0, (10.0, 10.0)).then_scale(0.5, (90.0, 90.0));
+        assert!((x.scale - 1.0).abs() < 1e-4);
+        assert!(x.point(5.0, 5.0).0.is_finite());
+    }
+
+    #[test]
+    fn scaling_grows_a_rect_about_its_origin() {
+        let x = Xform::IDENTITY.then_scale(2.0, (0.0, 0.0));
+        let r = x.rect(Rect::new(10.0, 20.0, 30.0, 40.0));
+        assert_eq!((r.x, r.y, r.w, r.h), (20.0, 40.0, 60.0, 80.0));
     }
 }

@@ -267,6 +267,12 @@ impl Timeline {
         if touched(Prop::Scale) {
             ov.scale = Some(self.value_at(node, Prop::Scale, t));
         }
+        if touched(Prop::Blur) {
+            let b = self.value_at(node, Prop::Blur, t);
+            if b > 0.5 {
+                ov.blur = Some(b);
+            }
+        }
         if touched(Prop::ClipInsetRight) {
             let r = self.value_at(node, Prop::ClipInsetRight, t).clamp(0.0, 1.0);
             ov.inset_clip = Some((0.0, r, 0.0, 0.0));
@@ -274,8 +280,7 @@ impl Timeline {
         ov
     }
 
-    /// True if any tween touches blur, which the rasterizer cannot yet render.
-    /// Reported rather than silently ignored.
+    /// True if any tween touches blur.
     pub fn uses_blur(&self) -> bool {
         self.tweens.iter().any(|t| t.prop == Prop::Blur)
     }

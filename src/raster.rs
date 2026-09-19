@@ -495,21 +495,69 @@ impl Canvas {
             }
 
             // Composite this row.
+            //
+            // The opaque case is not a micro-optimisation here: a composition
+            // fills a full-frame background every frame, and routing two
+            // million already-opaque pixels through a float source-over blend
+            // dominated the entire renderer. When coverage, element alpha and
+            // colour alpha are all saturated the result is exactly the source,
+            // so the blend is a four-byte store.
             let row = y * self.width as usize;
+            let opaque_src = alpha >= 1.0 && color.a == 255;
+            let src = [color.r, color.g, color.b, 255];
             for (i, &cov) in coverage.iter().enumerate() {
                 if cov <= 0.0 {
+                    continue;
+                }
+                let px = (row + x0 + i) * 4;
+                if opaque_src && cov >= 0.999 {
+                    self.data[px..px + 4].copy_from_slice(&src);
                     continue;
                 }
                 let a = (cov.min(1.0)) * alpha * (color.a as f32 / 255.0);
                 if a <= 0.0 {
                     continue;
                 }
-                blend(&mut self.data[(row + x0 + i) * 4..][..4], color, a);
+                blend(&mut self.data[px..px + 4], color, a);
             }
         }
     }
 
     pub fn fill_rect(&mut self, rect: Rect, color: Rgba, alpha: f32, clip: Option<Rect>) {
+        // Axis-aligned opaque rectangles are the single most common fill in a
+        // composition — every scene paints one the size of the frame — and they
+        // need none of the scanline machinery. Interior rows are a straight
+        // memcpy of a repeated pixel; only the fractional edges need coverage,
+        // which the general path still handles.
+        if alpha >= 1.0 && color.a == 255 {
+            let r = match clip {
+                Some(c) => rect.intersect(&c).intersect(&self.bounds()),
+                None => rect.intersect(&self.bounds()),
+            };
+            // Only take the fast path when the rect lands on whole pixels;
+            // otherwise the edges need real anti-aliasing.
+            let whole = |v: f32| (v - v.round()).abs() < 0.001;
+            if !r.is_empty() && whole(r.x) && whole(r.y) && whole(r.w) && whole(r.h) {
+                let x0 = r.x.round() as usize;
+                let y0 = r.y.round() as usize;
+                let x1 = (r.right().round() as usize).min(self.width as usize);
+                let y1 = (r.bottom().round() as usize).min(self.height as usize);
+                if x0 < x1 && y0 < y1 {
+                    let w = self.width as usize;
+                    let row: Vec<u8> = [color.r, color.g, color.b, 255]
+                        .iter()
+                        .cycle()
+                        .take((x1 - x0) * 4)
+                        .copied()
+                        .collect();
+                    for y in y0..y1 {
+                        let i = (y * w + x0) * 4;
+                        self.data[i..i + row.len()].copy_from_slice(&row);
+                    }
+                    return;
+                }
+            }
+        }
         self.fill_path(&Path::rect(rect), color, alpha, clip);
     }
 
@@ -584,9 +632,22 @@ fn add_span(cov: &mut [f32], x0: f32, x1: f32, weight: f32, offset: usize, limit
     }
 }
 
+/// Source-over composite, for callers outside this module (the glyph cache
+/// blits masks and needs exactly this blend).
+pub fn blend_pub(dst: &mut [u8], color: Rgba, a: f32) {
+    blend(dst, color, a)
+}
+
 /// Source-over composite of `color` at coverage-scaled alpha `a` onto `dst`.
 fn blend(dst: &mut [u8], color: Rgba, a: f32) {
     let a = a.clamp(0.0, 1.0);
+    if a >= 1.0 {
+        dst[0] = color.r;
+        dst[1] = color.g;
+        dst[2] = color.b;
+        dst[3] = 255;
+        return;
+    }
     let inv = 1.0 - a;
     let da = dst[3] as f32 / 255.0;
     let out_a = a + da * inv;
@@ -782,5 +843,316 @@ mod tests {
         c.fill_path(&single, Rgba::WHITE, 1.0, None);
         c.fill_rect(Rect::new(0.0, 0.0, 0.0, 10.0), Rgba::WHITE, 1.0, None);
         assert_eq!(ink(&c), 0);
+    }
+}
+
+/// Blur an RGBA8 buffer in place with a triple box blur.
+///
+/// Three successive box passes converge on a Gaussian (central limit theorem)
+/// and cost O(n) per pass regardless of radius, where a true Gaussian kernel
+/// costs O(n·r). At the radii compositions use for depth-of-field transitions —
+/// 10 to 20 pixels — the difference is well under one 8-bit level while a
+/// direct convolution is roughly 20x slower.
+///
+/// Alpha is blurred with colour, so a blurred element's edges soften rather
+/// than staying hard against the backdrop.
+pub fn blur(canvas: &mut Canvas, radius: f32) {
+    let (w, h) = (canvas.width, canvas.height);
+    blur_slice(&mut canvas.data, w, h, radius)
+}
+
+/// Blur only the rows a region touches.
+///
+/// A blurred element usually occupies a fraction of the frame, and blurring the
+/// untouched remainder is pure cost. The band is blurred **in place** through a
+/// mutable slice: copying it into its own canvas and back allocated a second
+/// full-frame buffer for every blurred element of every frame, which on a
+/// parallel render is one such buffer per worker simultaneously.
+pub fn blur_region(canvas: &mut Canvas, radius: f32, region: Option<Rect>) {
+    if radius <= 0.5 {
+        return;
+    }
+    let (cw, ch) = (canvas.width, canvas.height);
+    let Some(r) = region else {
+        return blur_slice(&mut canvas.data, cw, ch, radius);
+    };
+    let r = r.intersect(&Rect::new(0.0, 0.0, cw as f32, ch as f32));
+    if r.is_empty() {
+        return;
+    }
+    let y0 = r.y.floor().max(0.0) as usize;
+    let y1 = (r.bottom().ceil() as usize).min(ch as usize);
+    if y0 >= y1 {
+        return;
+    }
+    let w = cw as usize;
+    blur_slice(
+        &mut canvas.data[y0 * w * 4..y1 * w * 4],
+        cw,
+        (y1 - y0) as u32,
+        radius,
+    )
+}
+
+/// Blur an RGBA8 slice in place.
+fn blur_slice(data: &mut [u8], width: u32, height: u32, radius: f32) {
+    if radius <= 0.5 || width == 0 || height == 0 {
+        return;
+    }
+    // Blur at reduced resolution for large radii.
+    //
+    // A blur is a low-pass filter: it destroys exactly the high-frequency
+    // detail that full resolution preserves, so computing it at full scale
+    // spends work producing information the operation then discards. Halving
+    // the resolution quarters the pixel count and halves the required radius,
+    // and at these radii the difference is invisible. Browser compositors do
+    // the same.
+    let scale = ((radius / 4.0).floor() as u32).clamp(1, 8);
+    if scale > 1 && width > scale * 4 && height > scale * 4 {
+        let sw = width / scale;
+        let sh = height / scale;
+        let mut small = vec![0u8; sw as usize * sh as usize * 4];
+        downsample(data, width, height, &mut small, sw, sh);
+        blur_passes(&mut small, sw, sh, radius / scale as f32);
+        upsample(&small, sw, sh, data, width, height);
+        return;
+    }
+    blur_passes(data, width, height, radius)
+}
+
+fn blur_passes(data: &mut [u8], width: u32, height: u32, radius: f32) {
+    // Box width that best matches a Gaussian of this standard deviation.
+    let w = ((radius * 3.0 * (2.0 * std::f32::consts::PI).sqrt() / 4.0) + 0.5)
+        .floor()
+        .max(1.0);
+    let r = (w as usize).max(1);
+    for _ in 0..3 {
+        box_blur_h(data, width, height, r);
+        box_blur_v(data, width, height, r);
+    }
+}
+
+fn box_blur_h(data: &mut [u8], width: u32, height: u32, r: usize) {
+    let w = width as usize;
+    let h = height as usize;
+    if w == 0 || h == 0 {
+        return;
+    }
+    let mut row = vec![0u8; w * 4];
+    for y in 0..h {
+        let base = y * w * 4;
+        row.copy_from_slice(&data[base..base + w * 4]);
+        // Running sums, so each output pixel costs an add and a subtract
+        // rather than a full kernel pass.
+        let mut acc = [0u32; 4];
+        for x in 0..=r.min(w - 1) {
+            for k in 0..4 {
+                acc[k] += row[x * 4 + k] as u32;
+            }
+        }
+        let mut count = (r.min(w - 1) + 1) as u32;
+        for x in 0..w {
+            for k in 0..4 {
+                // Round rather than truncate. Flooring loses up to half a level
+                // per pixel per pass; over three iterations in two directions
+                // that compounds to a visible ~30% alpha loss, so a blurred
+                // element would fade as well as soften.
+                data[base + x * 4 + k] = ((acc[k] + count / 2) / count) as u8;
+            }
+            let add = x + r + 1;
+            if add < w {
+                for k in 0..4 {
+                    acc[k] += row[add * 4 + k] as u32;
+                }
+                count += 1;
+            }
+            if x >= r {
+                let sub = x - r;
+                for k in 0..4 {
+                    acc[k] -= row[sub * 4 + k] as u32;
+                }
+                count -= 1;
+            }
+        }
+    }
+}
+
+fn box_blur_v(data: &mut [u8], width: u32, height: u32, r: usize) {
+    let w = width as usize;
+    let h = height as usize;
+    if w == 0 || h == 0 {
+        return;
+    }
+    let mut col = vec![0u8; h * 4];
+    for x in 0..w {
+        for y in 0..h {
+            let src = (y * w + x) * 4;
+            col[y * 4..y * 4 + 4].copy_from_slice(&data[src..src + 4]);
+        }
+        let mut acc = [0u32; 4];
+        for y in 0..=r.min(h - 1) {
+            for k in 0..4 {
+                acc[k] += col[y * 4 + k] as u32;
+            }
+        }
+        let mut count = (r.min(h - 1) + 1) as u32;
+        for y in 0..h {
+            let dst = (y * w + x) * 4;
+            for k in 0..4 {
+                data[dst + k] = ((acc[k] + count / 2) / count) as u8;
+            }
+            let add = y + r + 1;
+            if add < h {
+                for k in 0..4 {
+                    acc[k] += col[add * 4 + k] as u32;
+                }
+                count += 1;
+            }
+            if y >= r {
+                let sub = y - r;
+                for k in 0..4 {
+                    acc[k] -= col[sub * 4 + k] as u32;
+                }
+                count -= 1;
+            }
+        }
+    }
+}
+
+/// Box-average into a smaller buffer.
+fn downsample(src: &[u8], sw: u32, sh: u32, dst: &mut [u8], dw: u32, dh: u32) {
+    let s_w = sw as usize;
+    let fx = sw as f32 / dw as f32;
+    let fy = sh as f32 / dh as f32;
+    for y in 0..dh as usize {
+        let y0 = (y as f32 * fy) as usize;
+        let y1 = (((y + 1) as f32 * fy) as usize).min(sh as usize).max(y0 + 1);
+        for x in 0..dw as usize {
+            let x0 = (x as f32 * fx) as usize;
+            let x1 = (((x + 1) as f32 * fx) as usize).min(s_w).max(x0 + 1);
+            let mut acc = [0u32; 4];
+            let mut n = 0u32;
+            for yy in y0..y1 {
+                for xx in x0..x1 {
+                    let i = (yy * s_w + xx) * 4;
+                    for k in 0..4 {
+                        acc[k] += src[i + k] as u32;
+                    }
+                    n += 1;
+                }
+            }
+            let o = (y * dw as usize + x) * 4;
+            for k in 0..4 {
+                dst[o + k] = (acc[k] / n.max(1)) as u8;
+            }
+        }
+    }
+}
+
+/// Bilinear expansion back over a larger buffer.
+fn upsample(src: &[u8], sw: u32, sh: u32, dst: &mut [u8], dw: u32, dh: u32) {
+    let s_w = sw as usize;
+    let s_h = sh as usize;
+    let d_w = dw as usize;
+    for y in 0..dh as usize {
+        let fy = (y as f32 + 0.5) * s_h as f32 / dh as f32 - 0.5;
+        let y0 = fy.floor().max(0.0) as usize;
+        let y1 = (y0 + 1).min(s_h - 1);
+        let ty = (fy - y0 as f32).clamp(0.0, 1.0);
+        for x in 0..d_w {
+            let fx = (x as f32 + 0.5) * s_w as f32 / dw as f32 - 0.5;
+            let x0 = fx.floor().max(0.0) as usize;
+            let x1 = (x0 + 1).min(s_w - 1);
+            let tx = (fx - x0 as f32).clamp(0.0, 1.0);
+            let o = (y * d_w + x) * 4;
+            for k in 0..4 {
+                let p = |yy: usize, xx: usize| src[(yy * s_w + xx) * 4 + k] as f32;
+                let top = p(y0, x0) * (1.0 - tx) + p(y0, x1) * tx;
+                let bot = p(y1, x0) * (1.0 - tx) + p(y1, x1) * tx;
+                dst[o + k] = (top * (1.0 - ty) + bot * ty).round() as u8;
+            }
+        }
+    }
+}
+
+/// Composite `src` over `dst` at full extent, honouring src alpha and a global
+/// alpha, clipped to `clip`.
+pub fn composite(dst: &mut Canvas, src: &Canvas, alpha: f32, clip: Option<Rect>) {
+    let region = match clip {
+        Some(c) => c.intersect(&dst.bounds()),
+        None => dst.bounds(),
+    };
+    if region.is_empty() {
+        return;
+    }
+    let x0 = region.x.floor().max(0.0) as usize;
+    let y0 = region.y.floor().max(0.0) as usize;
+    let x1 = (region.right().ceil() as usize).min(dst.width as usize);
+    let y1 = (region.bottom().ceil() as usize).min(dst.height as usize);
+    let w = dst.width as usize;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let i = (y * w + x) * 4;
+            let sa = src.data[i + 3] as f32 / 255.0 * alpha;
+            if sa <= 0.0 {
+                continue;
+            }
+            let color = Rgba::new(src.data[i], src.data[i + 1], src.data[i + 2], 255);
+            blend(&mut dst.data[i..i + 4], color, sa);
+        }
+    }
+}
+
+#[cfg(test)]
+mod blur_tests {
+    use super::*;
+
+    #[test]
+    fn blur_spreads_ink_and_conserves_it_roughly() {
+        let mut c = Canvas::new(64, 64);
+        c.fill_rect(Rect::new(28.0, 28.0, 8.0, 8.0), Rgba::WHITE, 1.0, None);
+        let before: u32 = c.data.chunks_exact(4).map(|p| p[3] as u32).sum();
+        let lit_before = c.data.chunks_exact(4).filter(|p| p[3] > 0).count();
+
+        blur(&mut c, 6.0);
+
+        let after: u32 = c.data.chunks_exact(4).map(|p| p[3] as u32).sum();
+        let lit_after = c.data.chunks_exact(4).filter(|p| p[3] > 0).count();
+        assert!(lit_after > lit_before * 3, "blur must spread the ink");
+        // Total alpha is roughly preserved; box blur loses a little to rounding.
+        let ratio = after as f32 / before as f32;
+        assert!((0.85..=1.05).contains(&ratio), "alpha ratio {ratio}");
+        // The centre stays brightest.
+        assert!(c.pixel(32, 32).a > c.pixel(32, 50).a);
+    }
+
+    #[test]
+    fn zero_radius_is_a_no_op() {
+        let mut c = Canvas::new(16, 16);
+        c.fill_rect(Rect::new(4.0, 4.0, 8.0, 8.0), Rgba::WHITE, 1.0, None);
+        let before = c.data.clone();
+        blur(&mut c, 0.0);
+        assert_eq!(c.data, before);
+    }
+
+    #[test]
+    fn composite_lays_one_canvas_over_another() {
+        let mut dst = Canvas::filled(8, 8, Rgba::BLACK);
+        let mut src = Canvas::new(8, 8);
+        src.fill_rect(Rect::new(0.0, 0.0, 4.0, 8.0), Rgba::WHITE, 1.0, None);
+        composite(&mut dst, &src, 1.0, None);
+        assert_eq!(dst.pixel(1, 1), Rgba::WHITE);
+        assert_eq!(dst.pixel(6, 1), Rgba::BLACK, "uncovered area untouched");
+    }
+
+    #[test]
+    fn composite_respects_clip_and_alpha() {
+        let mut dst = Canvas::filled(8, 8, Rgba::BLACK);
+        let mut src = Canvas::new(8, 8);
+        src.clear(Rgba::WHITE);
+        composite(&mut dst, &src, 0.5, Some(Rect::new(0.0, 0.0, 4.0, 8.0)));
+        let p = dst.pixel(1, 1).r;
+        assert!((120..=135).contains(&p), "half white over black, got {p}");
+        assert_eq!(dst.pixel(6, 1), Rgba::BLACK, "outside the clip");
     }
 }
