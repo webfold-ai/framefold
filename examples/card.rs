@@ -22,12 +22,19 @@ fn main() {
         }
     };
 
-    let (w, h, fps, seconds) = (1280u32, 720u32, 30u32, 4u32);
+    let env = |k: &str, d: u32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+    let (w, h, fps, seconds) = (env("FF_W", 1280), env("FF_H", 720), env("FF_FPS", 30), env("FF_SECS", 4));
     let total = fps * seconds;
 
+    let threads = std::env::var("FRAMEFOLD_THREADS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(framefold::default_threads);
+
     let t_render = std::time::Instant::now();
-    let frames: Vec<Vec<u8>> = (0..total)
-        .map(|i| {
+    let frames: Vec<Vec<u8>> = framefold::render_frames(total as usize, threads, |i| {
+        {
+            let i = i as u32;
             let t = i as f32 / (total - 1) as f32;
             let mut c = Canvas::filled(w, h, Rgba::rgb(11, 11, 15));
 
@@ -77,12 +84,12 @@ fn main() {
             .unwrap();
 
             c.into_rgba()
-        })
-        .collect();
+        }
+    });
 
     let render = t_render.elapsed();
     eprintln!(
-        "render: {total} frames at {w}x{h} in {:.2}s ({:.1} fps)",
+        "render: {total} frames at {w}x{h} on {threads} threads in {:.2}s ({:.1} fps)",
         render.as_secs_f64(),
         total as f64 / render.as_secs_f64()
     );
