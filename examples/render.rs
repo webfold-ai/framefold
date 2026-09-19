@@ -65,8 +65,6 @@ fn main() {
     );
 
     let total = (seconds * fps).round() as usize;
-    // FRAMEFOLD_MEMORY_MB picks the worker count from a footprint budget;
-    // FRAMEFOLD_THREADS overrides it outright.
     let threads = std::env::var("FRAMEFOLD_THREADS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
@@ -78,63 +76,67 @@ fn main() {
         })
         .unwrap_or_else(framefold::default_threads);
 
-    // Fuse render and encode per frame.
+    // Ask the timeline which frames are actually distinct before drawing any.
     //
-    // Each worker renders one frame into its own reused canvas, encodes it
-    // immediately, and keeps only the ~25 KB sample. The 8.3 MB of pixels dies
-    // before the next frame is drawn, so the live set is threads x frame and
-    // does not grow with duration. Batching render-then-encode would also bound
-    // memory, but serialises the two halves; folding keeps every worker busy
-    // doing both.
-    let live = framefold::render::live_frame_bytes(threads, w, h);
+    // A frame is a pure function of its overrides, so two times with the same
+    // overrides are the same image — knowable without producing either. The
+    // repeats are neither rendered nor encoded: they become all-skip P-frames,
+    // which cost a handful of bytes and no pixels.
+    let plan = tl.plan(total, fps);
     eprintln!(
-        "{w}x{h} {fps}fps {seconds}s · {} tweens · {threads} threads · live frame budget {:.0} MB",
-        tl.tweens.len(),
-        live as f64 / 1_048_576.0
+        "{w}x{h} {fps}fps {seconds}s · {} tweens · {threads} threads",
+        tl.tweens.len()
+    );
+    eprintln!(
+        "plan: {} distinct of {total} frames ({:.0}% repeat, skipped entirely)",
+        plan.distinct(),
+        plan.repeat_fraction() * 100.0
     );
 
     let t0 = std::time::Instant::now();
-    let samples: Vec<Vec<u8>> =
-        framefold::render::fold_frames(total, threads, w, h, |i, canvas| {
-            let t = i as f32 / fps;
-            let anim = timeline::FrameAnimator { timeline: &tl, time: t };
+    // Encode inside the fold, so a frame's 8.3 MB of pixels dies before the
+    // next is drawn and only its ~25 KB sample survives.
+    let idr: Vec<Vec<u8>> =
+        framefold::render::fold_frames(plan.distinct(), threads, w, h, |k, canvas| {
+            let anim = timeline::FrameAnimator {
+                timeline: &tl,
+                time: plan.distinct_times[k],
+            };
             paint::paint(canvas, &boxes, &fonts, &anim).expect("paint");
-            // Encode here, while this frame's pixels are still the only ones live.
-            let (_, _, mut nal) = transcode::h264::encode_mp4_track_qp_threads(
-                std::slice::from_ref(&canvas.data),
+            transcode::h264_inter::encode_idr_sample(
+                &canvas.data,
                 w,
                 h,
                 transcode::h264::DEFAULT_QP,
-                1,
+                k as u32,
             )
-            .expect("encode");
-            nal.pop().expect("one sample per frame")
+            .expect("encode")
         });
-    let elapsed = t0.elapsed();
+    let render_time = t0.elapsed();
 
-    // Parameter sets depend only on dimensions, so deriving them once from a
-    // single frame is exact rather than an approximation.
-    let probe = Canvas::new(w, h);
-    let (sps, pps, _) = transcode::h264::encode_mp4_track_qp_threads(
-        std::slice::from_ref(&probe.data),
+    // Skips carry no pixels, so they are synthesised from the plan alone.
+    let t1 = std::time::Instant::now();
+    let (samples, sync) = transcode::h264_inter::assemble_planned(
+        &idr,
+        &plan.shows,
         w,
         h,
         transcode::h264::DEFAULT_QP,
-        1,
     )
-    .expect("parameter sets");
-    drop(probe);
+    .expect("assemble");
+    let encode_time = t1.elapsed();
+    let sps = transcode::h264::nal_unit_pub(3, 7, &transcode::h264bits::build_sps(w, h));
+    let pps = transcode::h264::nal_unit_pub(3, 8, &transcode::h264bits::build_pps());
+    drop(idr);
 
-    // Stream straight to the file. Building the .mp4 in memory would hold the
-    // encoded stream a second time, which is the only term left that grows with
-    // duration.
     let file = std::fs::File::create(&out).expect("create output");
     let mut w_out = std::io::BufWriter::new(file);
-    let written = transcode::mp4::write_h264_mp4(
+    transcode::mp4::write_h264_mp4_sync(
         &mut w_out,
         &sps,
         &pps,
         &samples,
+        Some(&sync),
         w,
         h,
         fps.round() as u32,
@@ -144,11 +146,11 @@ fn main() {
     w_out.flush().expect("flush");
 
     let encoded: usize = samples.iter().map(|s| s.len()).sum();
-    let _ = written;
     eprintln!(
-        "{total} frames in {:.2}s ({:.1} fps) · encoded stream {:.1} MB · {out}",
-        elapsed.as_secs_f64(),
-        total as f64 / elapsed.as_secs_f64(),
+        "render {:.2}s · encode {:.2}s · total {:.2}s · {:.1} MB · {out}",
+        render_time.as_secs_f64(),
+        encode_time.as_secs_f64(),
+        (render_time + encode_time).as_secs_f64(),
         encoded as f64 / 1_048_576.0
     );
 }

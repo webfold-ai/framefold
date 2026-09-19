@@ -781,3 +781,174 @@ mod real_tests {
         assert!(tl.uses_blur(), "blur tweens should be recorded");
     }
 }
+
+/// A render plan: which frames are actually distinct, and what each frame shows.
+///
+/// # The collapse
+///
+/// Rendering every frame from scratch runs a loop whose result is frequently
+/// identical to the previous iteration. The timeline can tell which iterations
+/// those are *without producing them*: if no element's overrides differ between
+/// two times, the frames are identical by construction, because a frame is a
+/// pure function of the overrides.
+///
+/// On glossa that is 324 of 600 frames — 54% — which never need to be drawn or
+/// encoded. Detecting the same thing by comparing rendered pixels would require
+/// rendering them first, which is the work being avoided.
+#[derive(Clone, Debug)]
+pub struct Plan {
+    /// Times to actually render, one per distinct frame.
+    pub distinct_times: Vec<f32>,
+    /// `shows[i]` indexes `distinct_times` for output frame `i`.
+    pub shows: Vec<usize>,
+}
+
+impl Plan {
+    pub fn frames(&self) -> usize {
+        self.shows.len()
+    }
+    pub fn distinct(&self) -> usize {
+        self.distinct_times.len()
+    }
+    /// Fraction of frames that repeat their predecessor.
+    pub fn repeat_fraction(&self) -> f32 {
+        if self.shows.is_empty() {
+            return 0.0;
+        }
+        let repeats = self
+            .shows
+            .windows(2)
+            .filter(|w| w[0] == w[1])
+            .count();
+        repeats as f32 / self.shows.len() as f32
+    }
+}
+
+impl Timeline {
+    /// Build a render plan for `count` frames at `fps`.
+    ///
+    /// Frames are grouped by a signature of every animated node's overrides,
+    /// quantised to what a renderer can actually express: a translation below a
+    /// quarter-pixel or an opacity below 1/255 produces the same pixels, so
+    /// treating those as different would render identical frames twice.
+    ///
+    /// Only *consecutive* repeats collapse. A frame identical to one from ten
+    /// seconds ago is still drawn, because the encoder can only skip against
+    /// the immediately preceding reference.
+    pub fn plan(&self, count: usize, fps: f32) -> Plan {
+        let mut nodes: Vec<usize> = self.tweens.iter().map(|t| t.node).collect();
+        nodes.sort_unstable();
+        nodes.dedup();
+
+        let signature = |t: f32| -> Vec<i32> {
+            let mut sig = Vec::with_capacity(nodes.len() * 6);
+            for &n in &nodes {
+                let o = self.overrides_at(n, t);
+                let q = |v: f32, step: f32| (v / step).round() as i32;
+                sig.push(q(o.opacity.unwrap_or(1.0), 1.0 / 255.0));
+                sig.push(q(o.translate.0, 0.25));
+                sig.push(q(o.translate.1, 0.25));
+                sig.push(q(o.scale.unwrap_or(1.0), 0.0005));
+                sig.push(q(o.inset_clip.map(|c| c.1).unwrap_or(0.0), 0.0005));
+                sig.push(q(o.blur.unwrap_or(0.0), 0.25));
+            }
+            sig
+        };
+
+        let mut distinct_times = Vec::new();
+        let mut shows = Vec::with_capacity(count);
+        let mut prev: Option<Vec<i32>> = None;
+        for i in 0..count {
+            let t = i as f32 / fps;
+            let sig = signature(t);
+            if prev.as_ref() == Some(&sig) {
+                shows.push(distinct_times.len() - 1);
+            } else {
+                distinct_times.push(t);
+                shows.push(distinct_times.len() - 1);
+                prev = Some(sig);
+            }
+        }
+        Plan {
+            distinct_times,
+            shows,
+        }
+    }
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+
+    fn tl(tweens: Vec<Tween>) -> Timeline {
+        let duration = tweens.iter().map(|t| t.start + t.duration).fold(0.0, f32::max);
+        Timeline { tweens, duration }
+    }
+
+    #[test]
+    fn a_static_timeline_collapses_to_one_frame() {
+        let p = tl(vec![]).plan(300, 30.0);
+        assert_eq!(p.frames(), 300);
+        assert_eq!(p.distinct(), 1, "nothing animates, so one frame suffices");
+        assert!(p.repeat_fraction() > 0.99);
+    }
+
+    #[test]
+    fn a_hold_after_a_tween_collapses_only_the_hold() {
+        // One second of motion, then two seconds holding still.
+        let p = tl(vec![Tween {
+            node: 1,
+            prop: Prop::Opacity,
+            start: 0.0,
+            duration: 1.0,
+            from: Some(0.0),
+            to: 1.0,
+            ease: Ease::None,
+        }])
+        .plan(90, 30.0);
+        assert_eq!(p.frames(), 90);
+        // The moving second yields distinct frames; the still two do not.
+        assert!(p.distinct() > 20 && p.distinct() < 40, "got {}", p.distinct());
+    }
+
+    #[test]
+    fn every_output_frame_maps_to_a_rendered_one() {
+        let p = tl(vec![Tween {
+            node: 3,
+            prop: Prop::Y,
+            start: 0.5,
+            duration: 0.4,
+            from: Some(20.0),
+            to: 0.0,
+            ease: Ease::Power(4, Dir::Out),
+        }])
+        .plan(60, 30.0);
+        assert_eq!(p.shows.len(), 60);
+        for &s in &p.shows {
+            assert!(s < p.distinct(), "plan points past the rendered set");
+        }
+        // Indices are non-decreasing: a frame never points backwards.
+        assert!(p.shows.windows(2).all(|w| w[1] >= w[0]));
+    }
+
+    #[test]
+    fn sub_perceptible_motion_does_not_force_a_redraw() {
+        // A tween so slow that consecutive frames differ by far less than a
+        // pixel: those frames are the same image and must not be drawn twice.
+        let p = tl(vec![Tween {
+            node: 1,
+            prop: Prop::Y,
+            start: 0.0,
+            duration: 100.0,
+            from: Some(0.0),
+            to: 1.0,
+            ease: Ease::None,
+        }])
+        .plan(120, 30.0);
+        assert!(
+            p.distinct() < 10,
+            "a sub-pixel drift should collapse, got {} distinct",
+            p.distinct()
+        );
+    }
+}
