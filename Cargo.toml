@@ -1,0 +1,17 @@
+[package]
+name = "framefold"
+version = "0.1.0"
+edition = "2021"
+description = "Native compositor: HTML-style compositions to video frames, no browser"
+
+[dependencies]
+# Text layout and real TrueType outlines. framefold does the rasterizing; ruler
+# stays a layout kernel and hands back geometry, not pixels.
+ruler = { path = "../ruler-fix" }
+
+[dev-dependencies]
+# Used only to prove rendered frames survive a real encoder end to end.
+transcode = { path = "../transcode" }
+
+[profile.release]
+opt-level = 3
