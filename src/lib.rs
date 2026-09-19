@@ -32,6 +32,8 @@
 //! stroking (only rectangle borders are stroked). Those are separate pieces;
 //! this crate draws what it is told to draw.
 
+pub mod css;
+pub mod html;
 pub mod raster;
 pub mod render;
 pub mod text;
