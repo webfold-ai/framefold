@@ -193,6 +193,18 @@ pub struct Tween {
     pub from: Option<f32>,
     pub to: f32,
     pub ease: Ease,
+    /// Whether this tween's start value applies *before* the tween runs.
+    ///
+    /// Only `fromTo` does: GSAP defaults `immediateRender` to true for it, so
+    /// the from-state is established as soon as the timeline is built. That is
+    /// how a composition declares its at-rest appearance.
+    ///
+    /// `set` and `to` do not. A `set` is a zero-duration tween *at its time* —
+    /// before then the element keeps whatever CSS gave it. Treating a `set` as
+    /// pinning makes every element it touches jump to its final value at t=0:
+    /// on a real composition that put the entire hook on screen in frame 1,
+    /// where the browser shows an empty background.
+    pub pins: bool,
 }
 
 impl Tween {
@@ -216,7 +228,24 @@ impl Timeline {
     /// meaningful: GSAP records the value at the moment the tween begins, so a
     /// `.to()` after a `.set()` starts from what the `.set()` left behind.
     pub fn value_at(&self, node: usize, prop: Prop, t: f32) -> f32 {
+        self.value_at_opt(node, prop, t).unwrap_or_else(|| prop.resting())
+    }
+
+    /// As [`Self::value_at`], but `None` when no tween has taken effect yet.
+    ///
+    /// The distinction decides what a frame looks like before its animation
+    /// starts. A property no tween has touched must fall through to whatever
+    /// the stylesheet said — and the stylesheet is where a composition declares
+    /// its at-rest state, typically `opacity: 0` on everything that fades in.
+    /// Returning a generic default instead (1.0 for opacity) and overriding
+    /// with it puts the entire first scene on screen in frame one, where the
+    /// browser shows an empty background.
+    ///
+    /// A tween "has taken effect" at `t` when it has started, or when it is a
+    /// `fromTo`, whose from-state applies as soon as the timeline is built.
+    pub fn value_at_opt(&self, node: usize, prop: Prop, t: f32) -> Option<f32> {
         let mut current = prop.resting();
+        let mut touched = false;
         let mut relevant: Vec<&Tween> = self
             .tweens
             .iter()
@@ -232,7 +261,9 @@ impl Timeline {
             let from = tw.from.unwrap_or(current);
             if t >= tw.end() {
                 current = tw.to;
+                touched = true;
             } else if t >= tw.start {
+                touched = true;
                 let raw = if tw.duration <= 0.0 {
                     1.0
                 } else {
@@ -240,42 +271,41 @@ impl Timeline {
                 };
                 current = from + (tw.to - from) * tw.ease.apply(raw);
             } else {
-                // Not started. A `fromTo` pins its start value even before it
-                // runs — that is how a composition's initial state is set.
-                if let Some(f) = tw.from {
-                    current = f;
+                // Not started. Only a `fromTo` reaches back before its own
+                // start time; see Tween::pins.
+                if tw.pins {
+                    if let Some(f) = tw.from {
+                        current = f;
+                        touched = true;
+                    }
                 }
                 break;
             }
         }
-        current
+        touched.then_some(current)
     }
 
     /// Overrides for one element at time `t`.
     pub fn overrides_at(&self, node: usize, t: f32) -> Overrides {
-        let touched = |p: Prop| self.tweens.iter().any(|tw| tw.node == node && tw.prop == p);
         let mut ov = Overrides::default();
-        if touched(Prop::Opacity) {
-            ov.opacity = Some(self.value_at(node, Prop::Opacity, t).clamp(0.0, 1.0));
+        if let Some(o) = self.value_at_opt(node, Prop::Opacity, t) {
+            ov.opacity = Some(o.clamp(0.0, 1.0));
         }
-        if touched(Prop::X) || touched(Prop::Y) {
-            ov.translate = (
-                self.value_at(node, Prop::X, t),
-                self.value_at(node, Prop::Y, t),
-            );
+        let x = self.value_at_opt(node, Prop::X, t);
+        let y = self.value_at_opt(node, Prop::Y, t);
+        if x.is_some() || y.is_some() {
+            ov.translate = (x.unwrap_or(0.0), y.unwrap_or(0.0));
         }
-        if touched(Prop::Scale) {
-            ov.scale = Some(self.value_at(node, Prop::Scale, t));
+        if let Some(s) = self.value_at_opt(node, Prop::Scale, t) {
+            ov.scale = Some(s);
         }
-        if touched(Prop::Blur) {
-            let b = self.value_at(node, Prop::Blur, t);
+        if let Some(b) = self.value_at_opt(node, Prop::Blur, t) {
             if b > 0.5 {
                 ov.blur = Some(b);
             }
         }
-        if touched(Prop::ClipInsetRight) {
-            let r = self.value_at(node, Prop::ClipInsetRight, t).clamp(0.0, 1.0);
-            ov.inset_clip = Some((0.0, r, 0.0, 0.0));
+        if let Some(r) = self.value_at_opt(node, Prop::ClipInsetRight, t) {
+            ov.inset_clip = Some((0.0, r.clamp(0.0, 1.0), 0.0, 0.0));
         }
         ov
     }
@@ -381,15 +411,17 @@ pub fn extract(root: &Element, script: &str) -> Result<Timeline, String> {
         // immediately — GSAP's immediateRender defaults to true for fromTo,
         // which is how a composition establishes its at-rest state. A bare
         // `to` has immediateRender false and inherits whatever came before.
-        let from = if c.kind == "set" { Some(to) } else { from };
+        let is_set = c.kind == "set";
+        let from = if is_set { Some(to) } else { from };
         tl.tweens.push(Tween {
             node: c.node,
             prop,
             start: c.position,
-            duration: if c.kind == "set" { 0.0 } else { c.duration },
+            duration: if is_set { 0.0 } else { c.duration },
             from,
             to,
             ease: Ease::parse(&c.ease),
+            pins: c.kind == "fromTo",
         });
     }
 
@@ -637,7 +669,8 @@ mod tests {
             from: Some(0.0),
             to: 1.0,
             ease: Ease::None,
-        }]);
+                pins: true,
+            }]);
         // Before the tween, the element sits at the `from` value — that is how
         // a composition's initial hidden state is established.
         assert_eq!(tl.value_at(1, Prop::Opacity, 0.0), 0.0);
@@ -656,6 +689,7 @@ mod tests {
                 from: Some(70.0),
                 to: 70.0,
                 ease: Ease::None,
+                pins: true,
             },
             Tween {
                 node: 1,
@@ -665,6 +699,7 @@ mod tests {
                 from: None,
                 to: 0.0,
                 ease: Ease::None,
+                pins: true,
             },
         ]);
         // The `set` leaves y at 70; the `to` must start there, not at 0.
@@ -904,7 +939,8 @@ mod plan_tests {
             from: Some(0.0),
             to: 1.0,
             ease: Ease::None,
-        }])
+                pins: true,
+            }])
         .plan(90, 30.0);
         assert_eq!(p.frames(), 90);
         // The moving second yields distinct frames; the still two do not.
@@ -921,7 +957,8 @@ mod plan_tests {
             from: Some(20.0),
             to: 0.0,
             ease: Ease::Power(4, Dir::Out),
-        }])
+                pins: true,
+            }])
         .plan(60, 30.0);
         assert_eq!(p.shows.len(), 60);
         for &s in &p.shows {
@@ -943,7 +980,8 @@ mod plan_tests {
             from: Some(0.0),
             to: 1.0,
             ease: Ease::None,
-        }])
+                pins: true,
+            }])
         .plan(120, 30.0);
         assert!(
             p.distinct() < 10,
