@@ -35,17 +35,17 @@ const SAMPLES: &[usize] = &[1, 30, 60, 105, 150, 210, 240, 300, 360, 420, 480, 5
 ///
 /// Not 1.0, and it should not be: matching a browser's glyph hinting and
 /// subpixel positioning exactly is not a goal this renderer pursues. The number
-/// sits just under what the renderer currently achieves (0.971), so it catches
+/// sits just under what the renderer currently achieves (0.977), so it catches
 /// a regression without failing on the known, accepted difference.
 ///
 /// The first frame does reach 1.0000 exactly — a frame with no text is a frame
 /// with nothing to disagree about — which is why a static frame scoring below
 /// 1.0 is worth investigating rather than accepting. That is how the
 /// pre-timeline state bug was found: the hook was on screen in frame one.
-const MEAN_FLOOR: f64 = 0.965;
+const MEAN_FLOOR: f64 = 0.972;
 
 /// No single frame may fall below this, so an average cannot hide one bad frame.
-const WORST_FLOOR: f64 = 0.92;
+const WORST_FLOOR: f64 = 0.95;
 
 struct Fixture {
     boxes: layout::Boxes,

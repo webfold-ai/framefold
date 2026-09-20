@@ -385,7 +385,18 @@ impl<'a> Builder<'a> {
     }
 
     /// Intrinsic content size of a flex container.
-    fn flex_intrinsic(&self, n: &Pending, avail_w: f32) -> (f32, f32) {
+    ///
+    /// A row distributes its main axis here, not only when placing, and
+    /// re-measures each item at the width it will actually get. Without that
+    /// the container's cross size comes from items measured against the whole
+    /// container: a `flex: 1` card measured at 1640px fits its text on one line
+    /// and reports a short height, then paints at 509px where the text wraps
+    /// and is taller. The card itself was already corrected at placement time,
+    /// but its *ancestors* had been sized from the short measurement — so a
+    /// wrapper ended up 128px tall around 235px of content, and anything
+    /// anchored to that wrapper (a `transform-origin: 50% 100%`, say) pivoted
+    /// about the wrong point.
+    fn flex_intrinsic(&self, n: &mut Pending, avail_w: f32) -> (f32, f32) {
         let fs = n.font_size;
         let dir = direction_of(&n.styles);
         let gap = |prop: &str| {
@@ -400,6 +411,38 @@ impl<'a> Builder<'a> {
         };
         let _ = cross_gap;
         let n_gaps = n.children.len().saturating_sub(1) as f32;
+
+        // Resolve the main axis first for a row, so items are measured at the
+        // size they will be given rather than the size of the container.
+        if dir == Dir::Row {
+            let basis = |c: &Pending| -> f32 {
+                match c.styles.get("flex-basis") {
+                    Some("auto") | Some("content") | None => c.size.0,
+                    Some(b) => length(b, c.font_size, avail_w).unwrap_or(c.size.0),
+                }
+            };
+            let grow = |c: &Pending| -> f32 {
+                c.styles
+                    .get("flex-grow")
+                    .and_then(|v| v.trim().parse::<f32>().ok())
+                    .unwrap_or(0.0)
+            };
+            let used: f32 = n.children.iter().map(basis).sum::<f32>() + main_gap * n_gaps;
+            let free = (avail_w - used).max(0.0);
+            let total_grow: f32 = n.children.iter().map(grow).sum();
+            if total_grow > 0.0 && free > 0.0 {
+                let targets: Vec<f32> = n
+                    .children
+                    .iter()
+                    .map(|c| basis(c) + free * grow(c) / total_grow)
+                    .collect();
+                for (c, w) in n.children.iter_mut().zip(targets) {
+                    if (w - c.size.0).abs() > 0.5 {
+                        self.measure(c, w, avail_h_hint(c), true);
+                    }
+                }
+            }
+        }
 
         let mut main = 0.0f32;
         let mut cross = 0.0f32;
@@ -1076,4 +1119,13 @@ fn container_main_of(dir: Dir, content: Rect) -> f32 {
         Dir::Row => content.w,
         Dir::Column => content.h,
     }
+}
+
+
+/// Height available to a flex item being re-measured.
+///
+/// A row item's height is its own content; the container's height is what this
+/// measurement is being used to compute, so it cannot be an input to it.
+fn avail_h_hint(c: &Pending) -> f32 {
+    c.size.1.max(1.0)
 }
