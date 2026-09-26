@@ -3,6 +3,7 @@ name = "framefold"
 version = "0.1.0"
 edition = "2021"
 description = "Native compositor: HTML-style compositions to video frames, no browser"
+license-file = "LICENSE"
 
 # The renderer as a binary, so a host can run it out-of-process. A 1080p render
 # is CPU-heavy and memory-heavy; isolating it means a failure costs one job
@@ -14,7 +15,7 @@ path = "src/bin/framefold.rs"
 [dependencies]
 # Text layout and real TrueType outlines. framefold does the rasterizing; ruler
 # stays a layout kernel and hands back geometry, not pixels.
-ruler = { path = "../ruler-fix" }
+ruler = { git = "https://gitlab.tas.twn.network/twn/ptyktos/ruler.git", rev = "6994c74203641fecf16b0d7b147a950f0e1fae06" }
 # WOFF2 mandates Brotli. Writing a Brotli decoder is ~2k lines of intricate spec
 # work orthogonal to compositing, so this is the one dependency framefold takes.
 # It is isolated behind woff2::to_ttf, and ruler stays zero-dep.
@@ -26,7 +27,7 @@ brotli = { version = "8", default-features = false, features = ["std"] }
 rquickjs = { version = "0.10", features = ["bindgen"], optional = true }
 # Encoding and muxing. A real dependency rather than dev-only, now that the
 # renderer ships as a runnable binary and not just a library plus tests.
-transcode = { path = "../transcode", version = "0.2" }
+transcode = { git = "https://github.com/Ptyktos/transcode", rev = "f855e4217105863354f58c1d1c840685fff6e44b" }
 
 [features]
 default = ["js"]

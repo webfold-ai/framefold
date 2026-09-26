@@ -382,6 +382,7 @@ dependencies = [
 [[package]]
 name = "ruler"
 version = "0.1.0"
+source = "git+https://gitlab.tas.twn.network/twn/ptyktos/ruler.git?rev=6994c74203641fecf16b0d7b147a950f0e1fae06#6994c74203641fecf16b0d7b147a950f0e1fae06"
 
 [[package]]
 name = "rustc-hash"
@@ -485,6 +486,7 @@ dependencies = [
 [[package]]
 name = "transcode"
 version = "0.2.0"
+source = "git+https://github.com/Ptyktos/transcode?rev=f855e4217105863354f58c1d1c840685fff6e44b#f855e4217105863354f58c1d1c840685fff6e44b"
 
 [[package]]
 name = "unicode-ident"
@@ -512,3 +514,12 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
 ]
+
+[[patch.unused]]
+name = "sangdb"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "ruler"
+version = "0.1.0"
+source = "git+https://gitlab.tas.twn.network/twn/ptyktos/ruler.git?branch=main#bb42d5e698d03cdea5f91f9a2a3e308ed7cb1673"
