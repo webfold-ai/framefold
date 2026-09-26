@@ -1,0 +1,99 @@
+name: supply-chain
+
+on:
+  pull_request:
+    paths:
+      - '**/*.toml'
+      - '**/*.lock'
+      - 'Cargo.toml'
+      - '**/Cargo.toml'
+      - 'native/**'
+      - 'src/**'
+      - 'upstream/**'
+      - 'extensions/**'
+  push:
+    branches: [main, 'release/**']
+  schedule:
+    # Run daily at 06:13 UTC. RUSTSEC advisories land throughout the day;
+    # a stale green run is the worst outcome (no one sees the CVE).
+    - cron: '13 6 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+permissions:
+  contents: read
+
+jobs:
+  # Three coordinated gates — all must pass for the workflow to succeed.
+  # caretakers (Ptyktos/caretaker) consumes these three signals and the
+  # upstream evidence JSON for the supply-chain-control decision; a red
+  # signal on any of them blocks release-pr from merging.
+
+  audit:
+    name: cargo audit (rustsec)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-cargo-audit-action@v2
+      - name: Run cargo audit (BLOCKING on vulnerabilities)
+        run: cargo audit --deny warnings
+
+  deny:
+    name: cargo deny (licenses, sources, yanked)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run cargo-deny (BLOCKING on policy violations)
+        uses: EmbarkStudios/cargo-deny-action@v1
+
+  sbom:
+    name: SBOM + Provenance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cyclonedx-bom
+        run: cargo install --locked cargo-cyclonedx
+      - name: Generate CycloneDX SBOM
+        run: cargo cyclonedx --format json --output-filename ptyktos-coding-agent.sbom.json
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptyktos-coding-agent-sbom
+          path: ptyktos-coding-agent.sbom.json
+          retention-days: 90
+
+  # caretakers-specific bridge — the cross-repo compliance signal that
+  # Ptyktos/caretaker consumes. caretakers records the SBOM + the audit
+  # + the deny result into the supply-chain evidence stream; the release
+  # gate reads them at merge-time.
+  evidence:
+    name: Emit supply-chain evidence (for caretakers)
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [audit, deny, sbom]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build evidence payload
+        run: |
+          mkdir -p evidence
+          {
+            echo "{"
+            echo "  \"event\": \"ptyktos.supply_chain.audit\","
+            echo "  \"ts\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
+            echo "  \"repo\": \"Ptyktos/ptyktos-coding-agent\","
+            echo "  \"audit\": \"${{ needs.audit.result }}\","
+            echo "  \"deny\": \"${{ needs.deny.result }}\","
+            echo "  \"sbom_path\": \"ptyktos-coding-agent.sbom.json\""
+            echo "}"
+          } > evidence/supply-chain.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supply-chain-evidence
+          path: evidence/supply-chain.json

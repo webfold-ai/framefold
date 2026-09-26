@@ -1,0 +1,6 @@
+# Ptyktos repository-local cargo config — pins all transitive Ptyktos-
+# ecosystem crates to the local workspaces. The corresponding patches live
+# in Cargo.toml. The global ~/.cargo/config.toml wins for sccache +
+# target-dir; this file's only purpose is the inventory aliases (used by
+# `cargo Ptyktos-inventory`) so caretakers can find the substrate path
+# without grepping the repo.

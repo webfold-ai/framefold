@@ -1,0 +1,93 @@
+# cargo-deny configuration for ptyktos-coding-agent.
+#
+# Run with: cargo deny check
+#
+# Mirrors the cargo-audit ignore list in .cargo/audit.toml — see comments
+# there for the rationale + upstream-bump tracking. The `supply-chain` job
+# in .github/workflows/supply-chain.yml is a BLOCKING gate on every PR
+# touching Rust. cargo-deny and cargo-audit run side-by-side:
+#   - cargo-deny: banned licenses, banned sources, banned deps, yanked
+#     versions, advisory surface.
+#   - cargo-audit: rustsec advisory database (the canonical CVE feed for
+#     the Rust ecosystem).
+#
+# Together: the supply-chain gate enforces Ptyktos's policy that no Ptyktos
+# substrate crate ships a known-vulnerable dep or an incompatible license
+# without an explicit exception. Both checks fail the PR; caretaker's
+# release-pr job will not merge until they're green.
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+    # rsa Marvin-attack timing side-channel (sqlx-mysql transitive; no upstream fix).
+    "RUSTSEC-2023-0071",
+    # rustls-webpki reachable-panic in CRL parse (tonic/reqwest tls transitive).
+    "RUSTSEC-2026-0104",
+    # dlopen_derive unmaintained (fastembed transitive).
+    "RUSTSEC-2023-0051",
+    # rustls-pemfile unmaintained (tonic/reqwest transitive).
+    "RUSTSEC-2025-0134",
+    # rand unsound with custom logger in rng() (we don't install one).
+    "RUSTSEC-2026-0097",
+]
+
+[licenses]
+version = 2
+# Allowed licenses — broad but excluding strong copyleft (we ship
+# server-side binaries, not redistributable libraries with mixed licensing).
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "MPL-2.0", # weak copyleft on file basis — acceptable for server binaries
+    "CDLA-Permissive-2.0",
+    "CC0-1.0",
+    "OpenSSL",
+    "Unlicense",
+    "FSL-1.1-ALv2", # Functional Source License — Ptyktos substrate (memoryfold,
+                    # modelfold, etc.) is FSL-1.1-Apache-2.0. After 2 years
+                    # each FSL release converts to Apache-2.0; safe to ship
+                    # Ptyktos substrate as binaries while still under FSL.
+]
+confidence-threshold = 0.93
+
+[licenses.private]
+ignore = true
+
+[bans]
+# Banned crates — keep this list SHORT. The Ptyktos substrate (memoryfold,
+# hashtrinity, apeiron, kleis, sangdb, modelfold, verdict, guardfold,
+# telos, sangsec) is a path-dep stack, not a crates.io dep. Anything else
+# pulled from crates.io must have a justified reason.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = [
+    "https://github.com/Ptyktos/*",
+    "https://gitlab.tas.twn.network/twn/ptyktos/*",
+    "https://github.com/sanguinehost/*",
+    "https://github.com/sang-codspeed/*",
+    "https://github.com/nautilus-modelfold/*",
+    "https://github.com/orhun/*",
+]
+
+# Local path-deps are the canonical Ptyktos substrate path; the [patch]
+# section of Cargo.toml maps all git-dep fetches to local paths. Block
+# crates-io fetches of substrate crates explicitly:
+unknown-git = "deny"
+
+# caretakers routes Ptyktos's release-management through caretaker
+# (forge-neutral maintenance control plane); the Ptyktos forge
+# (`https://github.com/Ptyktos/*`) is the trusted source.
+allow-org = "Ptyktos"
