@@ -15,7 +15,7 @@ path = "src/bin/framefold.rs"
 [dependencies]
 # Text layout and real TrueType outlines. framefold does the rasterizing; ruler
 # stays a layout kernel and hands back geometry, not pixels.
-ruler = { git = "https://gitlab.tas.twn.network/twn/ptyktos/ruler.git", rev = "6994c74203641fecf16b0d7b147a950f0e1fae06" }
+ruler = { git = "https://github.com/Ptyktos/ruler", rev = "6994c74203641fecf16b0d7b147a950f0e1fae06" }
 # WOFF2 mandates Brotli. Writing a Brotli decoder is ~2k lines of intricate spec
 # work orthogonal to compositing, so this is the one dependency framefold takes.
 # It is isolated behind woff2::to_ttf, and ruler stays zero-dep.
