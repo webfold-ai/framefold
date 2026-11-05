@@ -228,7 +228,8 @@ impl Timeline {
     /// meaningful: GSAP records the value at the moment the tween begins, so a
     /// `.to()` after a `.set()` starts from what the `.set()` left behind.
     pub fn value_at(&self, node: usize, prop: Prop, t: f32) -> f32 {
-        self.value_at_opt(node, prop, t).unwrap_or_else(|| prop.resting())
+        self.value_at_opt(node, prop, t)
+            .unwrap_or_else(|| prop.resting())
     }
 
     /// As [`Self::value_at`], but `None` when no tween has taken effect yet.
@@ -350,12 +351,7 @@ fn numeric(prop: Prop, raw: &str) -> Option<f32> {
     match prop {
         Prop::ClipInsetRight => inset_right(raw),
         Prop::Blur => blur_px(raw),
-        _ => raw
-            .trim()
-            .trim_end_matches("px")
-            .trim()
-            .parse::<f32>()
-            .ok(),
+        _ => raw.trim().trim_end_matches("px").trim().parse::<f32>().ok(),
     }
 }
 
@@ -376,7 +372,10 @@ struct RawCall {
 fn decode_call(line: &str) -> Result<RawCall, String> {
     let f: Vec<&str> = line.split('\u{1}').collect();
     if f.len() != 9 {
-        return Err(format!("timeline record has {} fields, expected 9", f.len()));
+        return Err(format!(
+            "timeline record has {} fields, expected 9",
+            f.len()
+        ));
     }
     Ok(RawCall {
         kind: f[0].to_string(),
@@ -405,7 +404,9 @@ pub fn extract(root: &Element, script: &str) -> Result<Timeline, String> {
         let Some(prop) = Prop::from_key(&c.key) else {
             continue;
         };
-        let Some(to) = numeric(prop, &c.to) else { continue };
+        let Some(to) = numeric(prop, &c.to) else {
+            continue;
+        };
         let from = c.from.as_deref().and_then(|v| numeric(prop, v));
         // `set` pins a value with no interpolation. `fromTo` pins its start
         // immediately — GSAP's immediateRender defaults to true for fromTo,
@@ -425,11 +426,7 @@ pub fn extract(root: &Element, script: &str) -> Result<Timeline, String> {
         });
     }
 
-    tl.duration = tl
-        .tweens
-        .iter()
-        .map(|t| t.end())
-        .fold(0.0, f32::max);
+    tl.duration = tl.tweens.iter().map(|t| t.end()).fold(0.0, f32::max);
     Ok(tl)
 }
 
@@ -580,7 +577,6 @@ fn run_script(_root: &Element, _script: &str) -> Result<Vec<RawCall>, String> {
     Err("timeline extraction needs the `js` feature".into())
 }
 
-
 /// Node-indexed overrides for a frame, ready for paint.
 pub struct NodeOverrides {
     pub map: HashMap<usize, Overrides>,
@@ -631,7 +627,10 @@ mod tests {
         let peak = (60..=90)
             .map(|i| e.apply(i as f32 / 100.0))
             .fold(0.0f32, f32::max);
-        assert!(peak > 1.0, "back.out must overshoot past 1, peaked at {peak}");
+        assert!(
+            peak > 1.0,
+            "back.out must overshoot past 1, peaked at {peak}"
+        );
         assert!((e.apply(1.0) - 1.0).abs() < 1e-6, "and still land on 1");
     }
 
@@ -669,8 +668,8 @@ mod tests {
             from: Some(0.0),
             to: 1.0,
             ease: Ease::None,
-                pins: true,
-            }]);
+            pins: true,
+        }]);
         // Before the tween, the element sits at the `from` value — that is how
         // a composition's initial hidden state is established.
         assert_eq!(tl.value_at(1, Prop::Opacity, 0.0), 0.0);
@@ -768,7 +767,9 @@ mod real_tests {
 
     #[test]
     fn the_typewriter_wipes_are_recorded_as_step_eased_clip() {
-        let Some((tl, root)) = extract_real() else { return };
+        let Some((tl, root)) = extract_real() else {
+            return;
+        };
         for id in ["s2-wrap1", "s2-wrap2", "s2-wrap3"] {
             let n = css::query_indices(&root, &format!("#{id}"));
             assert_eq!(n.len(), 1, "#{id} not found");
@@ -790,7 +791,9 @@ mod real_tests {
 
     #[test]
     fn the_command_is_hidden_at_rest_and_revealed_later() {
-        let Some((tl, root)) = extract_real() else { return };
+        let Some((tl, root)) = extract_real() else {
+            return;
+        };
         let n = css::query_indices(&root, "#s2-wrap1")[0];
         // At t=0 the wipe has not run: fully clipped from the right.
         assert_eq!(tl.value_at(n, Prop::ClipInsetRight, 0.0), 1.0);
@@ -800,17 +803,24 @@ mod real_tests {
 
     #[test]
     fn scenes_cross_fade_over_the_run() {
-        let Some((tl, root)) = extract_real() else { return };
+        let Some((tl, root)) = extract_real() else {
+            return;
+        };
         let s3 = css::query_indices(&root, "#s3")[0];
         // #s3 fades in around 9.75s and out around 16.8s.
         assert!(tl.value_at(s3, Prop::Opacity, 5.0) < 0.5, "hidden early");
         assert!(tl.value_at(s3, Prop::Opacity, 12.0) > 0.9, "visible mid");
-        assert!(tl.value_at(s3, Prop::Opacity, 19.0) < 0.1, "gone by the outro");
+        assert!(
+            tl.value_at(s3, Prop::Opacity, 19.0) < 0.1,
+            "gone by the outro"
+        );
     }
 
     #[test]
     fn blur_is_detected_and_reported_not_silently_dropped() {
-        let Some((tl, _)) = extract_real() else { return };
+        let Some((tl, _)) = extract_real() else {
+            return;
+        };
         // Three transitions animate filter: blur(). The rasterizer cannot draw
         // it yet, so the timeline must at least say so.
         assert!(tl.uses_blur(), "blur tweens should be recorded");
@@ -850,11 +860,7 @@ impl Plan {
         if self.shows.is_empty() {
             return 0.0;
         }
-        let repeats = self
-            .shows
-            .windows(2)
-            .filter(|w| w[0] == w[1])
-            .count();
+        let repeats = self.shows.windows(2).filter(|w| w[0] == w[1]).count();
         repeats as f32 / self.shows.len() as f32
     }
 }
@@ -916,7 +922,10 @@ mod plan_tests {
     use super::*;
 
     fn tl(tweens: Vec<Tween>) -> Timeline {
-        let duration = tweens.iter().map(|t| t.start + t.duration).fold(0.0, f32::max);
+        let duration = tweens
+            .iter()
+            .map(|t| t.start + t.duration)
+            .fold(0.0, f32::max);
         Timeline { tweens, duration }
     }
 
@@ -939,12 +948,16 @@ mod plan_tests {
             from: Some(0.0),
             to: 1.0,
             ease: Ease::None,
-                pins: true,
-            }])
+            pins: true,
+        }])
         .plan(90, 30.0);
         assert_eq!(p.frames(), 90);
         // The moving second yields distinct frames; the still two do not.
-        assert!(p.distinct() > 20 && p.distinct() < 40, "got {}", p.distinct());
+        assert!(
+            p.distinct() > 20 && p.distinct() < 40,
+            "got {}",
+            p.distinct()
+        );
     }
 
     #[test]
@@ -957,8 +970,8 @@ mod plan_tests {
             from: Some(20.0),
             to: 0.0,
             ease: Ease::Power(4, Dir::Out),
-                pins: true,
-            }])
+            pins: true,
+        }])
         .plan(60, 30.0);
         assert_eq!(p.shows.len(), 60);
         for &s in &p.shows {
@@ -980,8 +993,8 @@ mod plan_tests {
             from: Some(0.0),
             to: 1.0,
             ease: Ease::None,
-                pins: true,
-            }])
+            pins: true,
+        }])
         .plan(120, 30.0);
         assert!(
             p.distinct() < 10,

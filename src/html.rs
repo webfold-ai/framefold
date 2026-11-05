@@ -16,8 +16,8 @@ use std::collections::HashMap;
 
 /// Elements that never have children or a close tag.
 const VOID: &[&str] = &[
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
-    "source", "track", "wbr",
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
+    "track", "wbr",
 ];
 
 /// Elements whose content is raw text, not markup.
@@ -81,7 +81,9 @@ impl Element {
 
     /// First descendant (or self) carrying the given attribute.
     pub fn find_with_attr(&self, name: &str) -> Option<&Element> {
-        self.descendants().into_iter().find(|e| e.attrs.contains_key(name))
+        self.descendants()
+            .into_iter()
+            .find(|e| e.attrs.contains_key(name))
     }
 
     /// Concatenated contents of every `<style>` element in the subtree.
@@ -383,10 +385,7 @@ pub fn decode_entities(s: &str) -> String {
             continue;
         }
         // Entities are short; a ';' far away is a literal ampersand.
-        let end = s[i..]
-            .find(';')
-            .filter(|&e| e <= 10)
-            .map(|e| i + e);
+        let end = s[i..].find(';').filter(|&e| e <= 10).map(|e| i + e);
         let Some(end) = end else {
             out.push('&');
             i += 1;
@@ -533,7 +532,10 @@ mod tests {
 
         // Entity decoding reached real content.
         let text = comp.text();
-        assert!(text.contains('\u{2019}'), "didn’t should carry a curly apostrophe");
+        assert!(
+            text.contains('\u{2019}'),
+            "didn’t should carry a curly apostrophe"
+        );
         assert!(text.contains('\u{2014}'), "em dash expected");
     }
 }

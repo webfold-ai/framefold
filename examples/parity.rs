@@ -107,7 +107,11 @@ fn main() {
 
     println!("frames compared : {}", scores.len());
     println!("mean SSIM       : {mean:.4}");
-    println!("best  frame     : #{} {:.4}", sorted.last().unwrap().0, sorted.last().unwrap().1);
+    println!(
+        "best  frame     : #{} {:.4}",
+        sorted.last().unwrap().0,
+        sorted.last().unwrap().1
+    );
     println!("worst frame     : #{} {:.4}", sorted[0].0, sorted[0].1);
     println!("\nworst 8 frames (t = frame/{fps} seconds):");
     for (i, s) in sorted.iter().take(8) {

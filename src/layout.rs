@@ -68,7 +68,9 @@ impl Boxes {
     }
 
     pub fn find_id(&self, id: &str) -> Option<&Boxes> {
-        self.walk().into_iter().find(|b| b.id.as_deref() == Some(id))
+        self.walk()
+            .into_iter()
+            .find(|b| b.id.as_deref() == Some(id))
     }
 
     pub fn has_class(&self, c: &str) -> bool {
@@ -129,8 +131,8 @@ fn edges(s: &Styles, prefix: &str, suffix: &str, fs: f32, basis: f32) -> Edges {
 /// Defaulting everything to block stacks a line's spans vertically instead of
 /// running them along a line, which silently doubles line heights.
 const INLINE_TAGS: &[&str] = &[
-    "span", "a", "em", "strong", "b", "i", "u", "s", "small", "code", "kbd", "samp", "var",
-    "sub", "sup", "abbr", "cite", "q", "mark", "time", "label", "br", "img",
+    "span", "a", "em", "strong", "b", "i", "u", "s", "small", "code", "kbd", "samp", "var", "sub",
+    "sup", "abbr", "cite", "q", "mark", "time", "label", "br", "img",
 ];
 
 fn default_display(tag: &str) -> Display {
@@ -306,7 +308,13 @@ impl<'a> Builder<'a> {
 
         let inner_avail_w = explicit_w
             .or(inset_w)
-            .map(|w| if border_box { w - pad.horizontal() - bord.horizontal() } else { w })
+            .map(|w| {
+                if border_box {
+                    w - pad.horizontal() - bord.horizontal()
+                } else {
+                    w
+                }
+            })
             .unwrap_or(avail_w - pad.horizontal() - bord.horizontal() - mar.horizontal())
             .max(0.0);
 
@@ -341,11 +349,7 @@ impl<'a> Builder<'a> {
                 if !n.children.is_empty() && inline_children {
                     // One inline run: widths add, height is the tallest.
                     w = n.children.iter().map(|c| c.size.0).sum();
-                    h = n
-                        .children
-                        .iter()
-                        .map(|c| c.size.1)
-                        .fold(0.0, f32::max);
+                    h = n.children.iter().map(|c| c.size.1).fold(0.0, f32::max);
                 } else {
                     for c in &n.children {
                         let cm = edges(&c.styles, "margin", "", c.font_size, inner_avail_w);
@@ -374,11 +378,23 @@ impl<'a> Builder<'a> {
 
         let w = explicit_w
             .or(inset_w)
-            .map(|w| if border_box { w } else { w + pad.horizontal() + bord.horizontal() })
+            .map(|w| {
+                if border_box {
+                    w
+                } else {
+                    w + pad.horizontal() + bord.horizontal()
+                }
+            })
             .unwrap_or(content_w + pad.horizontal() + bord.horizontal());
         let h = explicit_h
             .or(inset_h)
-            .map(|h| if border_box { h } else { h + pad.vertical() + bord.vertical() })
+            .map(|h| {
+                if border_box {
+                    h
+                } else {
+                    h + pad.vertical() + bord.vertical()
+                }
+            })
             .unwrap_or(content_h + pad.vertical() + bord.vertical());
 
         n.size = (w, h);
@@ -495,10 +511,7 @@ impl<'a> Builder<'a> {
         // its width is the widest line and its height is line-count * leading.
         // Measuring the unwrapped width instead sizes the box for one long
         // line, and the text then overflows into whatever sits beside it.
-        let nowrap = matches!(
-            n.styles.get("white-space"),
-            Some("nowrap") | Some("pre")
-        );
+        let nowrap = matches!(n.styles.get("white-space"), Some("nowrap") | Some("pre"));
         let max = if nowrap || !avail_w.is_finite() {
             None
         } else {
@@ -517,10 +530,7 @@ impl<'a> Builder<'a> {
         let bord = edges(&n.styles, "border", "-width", fs, containing.w);
         let border_box = n.styles.get("box-sizing") == Some("border-box");
 
-        let positioned = matches!(
-            n.styles.get("position"),
-            Some("absolute") | Some("fixed")
-        );
+        let positioned = matches!(n.styles.get("position"), Some("absolute") | Some("fixed"));
 
         // The box's own rectangle. An absolutely positioned box resolves
         // against its containing block's edges; everything else takes the slot
@@ -637,7 +647,9 @@ impl<'a> Builder<'a> {
             };
             match c.styles.get("flex-basis") {
                 Some("auto") | Some("content") | None => measured,
-                Some(b) => length(b, c.font_size, container_main_of(dir, content)).unwrap_or(measured),
+                Some(b) => {
+                    length(b, c.font_size, container_main_of(dir, content)).unwrap_or(measured)
+                }
             }
         };
         let container_main = match dir {
@@ -732,7 +744,11 @@ impl<'a> Builder<'a> {
                 Dir::Column => (child.size.0, content.w),
             };
             let stretched = align == "stretch" && !explicit_cross;
-            let cross = if stretched { container_cross } else { cross_size };
+            let cross = if stretched {
+                container_cross
+            } else {
+                cross_size
+            };
             let cross_off = match align {
                 "center" => (container_cross - cross) / 2.0,
                 "flex-end" | "end" => container_cross - cross,
@@ -893,7 +909,10 @@ mod tests {
         );
         assert_eq!(b.children[0].rect.y, 0.0);
         assert_eq!(b.children[0].rect.h, 30.0);
-        assert_eq!(b.children[1].rect.y, 30.0, "second child stacks below first");
+        assert_eq!(
+            b.children[1].rect.y, 30.0,
+            "second child stacks below first"
+        );
         assert_eq!(b.children[1].rect.h, 50.0);
         assert_eq!(b.children[0].rect.w, 200.0, "block fills its parent");
     }
@@ -969,8 +988,16 @@ mod tests {
             400.0,
         );
         assert_eq!(b.rect.w, 200.0, "border box does not grow with padding");
-        assert!((b.content.w - (200.0 - 88.0 - 2.0)).abs() < 0.01, "content {}", b.content.w);
-        assert!((b.content.x - 45.0).abs() < 0.01, "content x {}", b.content.x);
+        assert!(
+            (b.content.w - (200.0 - 88.0 - 2.0)).abs() < 0.01,
+            "content {}",
+            b.content.w
+        );
+        assert!(
+            (b.content.x - 45.0).abs() < 0.01,
+            "content x {}",
+            b.content.x
+        );
     }
 
     #[test]
@@ -1033,8 +1060,16 @@ mod tests {
             let s = b.find_id(id).unwrap_or_else(|| panic!("{id} missing"));
             assert_eq!((s.rect.w, s.rect.h), (1920.0, 1080.0), "{id} should fill");
             // padding: 0 140px
-            assert!((s.content.x - 140.0).abs() < 0.01, "{id} content x {}", s.content.x);
-            assert!((s.content.w - 1640.0).abs() < 0.01, "{id} content w {}", s.content.w);
+            assert!(
+                (s.content.x - 140.0).abs() < 0.01,
+                "{id} content x {}",
+                s.content.x
+            );
+            assert!(
+                (s.content.w - 1640.0).abs() < 0.01,
+                "{id} content w {}",
+                s.content.w
+            );
         }
     }
 
@@ -1048,7 +1083,11 @@ mod tests {
             .find(|x| x.has_class("term-card"))
             .expect("term-card");
         // width: 100% of the scene's 1640px content box.
-        assert!((card.rect.w - 1640.0).abs() < 0.5, "card width {}", card.rect.w);
+        assert!(
+            (card.rect.w - 1640.0).abs() < 0.5,
+            "card width {}",
+            card.rect.w
+        );
         // padding 40/44 plus a 1px border, inside the declared width.
         assert!(
             (card.content.w - (1640.0 - 88.0 - 2.0)).abs() < 0.5,
@@ -1061,7 +1100,11 @@ mod tests {
     fn the_three_cards_split_the_row_evenly() {
         let Some(f) = real() else { return };
         let b = lay(&f);
-        let cards: Vec<&Boxes> = b.walk().into_iter().filter(|x| x.has_class("card")).collect();
+        let cards: Vec<&Boxes> = b
+            .walk()
+            .into_iter()
+            .filter(|x| x.has_class("card"))
+            .collect();
         assert_eq!(cards.len(), 3, "expected three cards");
         let expected = (1640.0 - 2.0 * 56.0) / 3.0;
         for c in &cards {
@@ -1093,7 +1136,11 @@ mod tests {
             );
         }
         // 60px type: the line box should be about 60*1.2 tall.
-        assert!((line.rect.h - 72.0).abs() < 8.0, "line height {}", line.rect.h);
+        assert!(
+            (line.rect.h - 72.0).abs() < 8.0,
+            "line height {}",
+            line.rect.h
+        );
     }
 
     #[test]
@@ -1120,7 +1167,6 @@ fn container_main_of(dir: Dir, content: Rect) -> f32 {
         Dir::Column => content.h,
     }
 }
-
 
 /// Height available to a flex item being re-measured.
 ///

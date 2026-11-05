@@ -82,8 +82,8 @@ pub fn draw_glyph(
         return Ok(());
     }
     // Whole-pixel origin plus a quantised fractional part.
-    let bin = (((pen_x.fract() + 1.0).fract()) * SUBPIXEL_BINS as f32).floor() as usize
-        % SUBPIXEL_BINS;
+    let bin =
+        (((pen_x.fract() + 1.0).fract()) * SUBPIXEL_BINS as f32).floor() as usize % SUBPIXEL_BINS;
     let origin_x = pen_x.floor();
     // The baseline is quantised the same way, so a line at y=100.5 is not
     // rebuilt for every glyph on it.
@@ -278,12 +278,26 @@ mod tests {
         );
 
         let mut cached = Canvas::new(80, 80);
-        draw_glyph(&mut cached, &f, gid, size, 10.0, 60.0, Rgba::BLACK, 1.0, None).unwrap();
+        draw_glyph(
+            &mut cached,
+            &f,
+            gid,
+            size,
+            10.0,
+            60.0,
+            Rgba::BLACK,
+            1.0,
+            None,
+        )
+        .unwrap();
 
         // Both take the same rasterizer path, so at a whole-pixel position they
         // must agree exactly — any drift means the mask is offset.
         assert_eq!(ink(&cached), ink(&direct), "different coverage");
-        assert_eq!(cached.data, direct.data, "cached glyph differs from direct fill");
+        assert_eq!(
+            cached.data, direct.data,
+            "cached glyph differs from direct fill"
+        );
     }
 
     #[test]
@@ -292,8 +306,18 @@ mod tests {
         clear();
         let mut c = Canvas::new(400, 80);
         for i in 0..20 {
-            draw_glyph(&mut c, &f, f.glyph_id('a'), 32.0, 10.0 + i as f32 * 18.0, 60.0,
-                       Rgba::BLACK, 1.0, None).unwrap();
+            draw_glyph(
+                &mut c,
+                &f,
+                f.glyph_id('a'),
+                32.0,
+                10.0 + i as f32 * 18.0,
+                60.0,
+                Rgba::BLACK,
+                1.0,
+                None,
+            )
+            .unwrap();
         }
         // 20 draws at whole-pixel steps: one glyph, one subpixel bin.
         assert_eq!(len(), 1, "identical positions should share a cache entry");
@@ -306,8 +330,18 @@ mod tests {
         clear();
         let mut c = Canvas::new(200, 80);
         for k in 0..4 {
-            draw_glyph(&mut c, &f, f.glyph_id('i'), 32.0, 10.0 + k as f32 * 0.25, 60.0,
-                       Rgba::BLACK, 1.0, None).unwrap();
+            draw_glyph(
+                &mut c,
+                &f,
+                f.glyph_id('i'),
+                32.0,
+                10.0 + k as f32 * 0.25,
+                60.0,
+                Rgba::BLACK,
+                1.0,
+                None,
+            )
+            .unwrap();
         }
         assert_eq!(len(), 4, "four subpixel bins should be four entries");
     }
@@ -317,7 +351,18 @@ mod tests {
         let Some(f) = font() else { return };
         clear();
         let mut c = Canvas::new(60, 60);
-        draw_glyph(&mut c, &f, f.glyph_id(' '), 32.0, 10.0, 40.0, Rgba::BLACK, 1.0, None).unwrap();
+        draw_glyph(
+            &mut c,
+            &f,
+            f.glyph_id(' '),
+            32.0,
+            10.0,
+            40.0,
+            Rgba::BLACK,
+            1.0,
+            None,
+        )
+        .unwrap();
         assert_eq!(ink(&c), 0, "a space must not paint");
         assert_eq!(len(), 1, "and its absence is still cached, not re-derived");
     }
@@ -327,10 +372,31 @@ mod tests {
         let Some(f) = font() else { return };
         clear();
         let mut full = Canvas::new(80, 80);
-        draw_glyph(&mut full, &f, f.glyph_id('M'), 60.0, 5.0, 65.0, Rgba::BLACK, 1.0, None).unwrap();
+        draw_glyph(
+            &mut full,
+            &f,
+            f.glyph_id('M'),
+            60.0,
+            5.0,
+            65.0,
+            Rgba::BLACK,
+            1.0,
+            None,
+        )
+        .unwrap();
         let mut clipped = Canvas::new(80, 80);
-        draw_glyph(&mut clipped, &f, f.glyph_id('M'), 60.0, 5.0, 65.0, Rgba::BLACK, 1.0,
-                   Some(Rect::new(0.0, 0.0, 20.0, 80.0))).unwrap();
+        draw_glyph(
+            &mut clipped,
+            &f,
+            f.glyph_id('M'),
+            60.0,
+            5.0,
+            65.0,
+            Rgba::BLACK,
+            1.0,
+            Some(Rect::new(0.0, 0.0, 20.0, 80.0)),
+        )
+        .unwrap();
         assert!(ink(&clipped) > 0);
         assert!(ink(&clipped) < ink(&full), "clip must remove ink");
     }
@@ -340,8 +406,22 @@ mod tests {
         let Some(f) = font() else { return };
         clear();
         let mut c = Canvas::filled(80, 80, Rgba::WHITE);
-        draw_glyph(&mut c, &f, f.glyph_id('M'), 60.0, 5.0, 65.0, Rgba::BLACK, 0.5, None).unwrap();
+        draw_glyph(
+            &mut c,
+            &f,
+            f.glyph_id('M'),
+            60.0,
+            5.0,
+            65.0,
+            Rgba::BLACK,
+            0.5,
+            None,
+        )
+        .unwrap();
         let darkest = c.data.chunks_exact(4).map(|p| p[0]).min().unwrap();
-        assert!((110..=145).contains(&darkest), "half-alpha black on white: {darkest}");
+        assert!(
+            (110..=145).contains(&darkest),
+            "half-alpha black on white: {darkest}"
+        );
     }
 }

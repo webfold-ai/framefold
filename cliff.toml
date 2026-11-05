@@ -2,16 +2,14 @@
 
 [remote.github]
 owner = "Ptyktos"
-repo = "ptyktos-coding-agent"
+repo = "framefold"
 
 [changelog]
 header = """
-# Ptyktos-coding-agent
+# Changelog
 
-Ptyktos-native fork of pi-coding-agent / oh-my-pi (omp.sh) — Rust core +
-TS extensions on apeiron / hashtrinity / memoryfold / kleis / sangdb /
-modelfold / verdict / guardfold / telos / sangsec substrate. Replaces
-SQLite memory, git-checkpoint, tool-gate, event-bus, ontology projection.
+All notable changes to framefold are listed here. Generated from commit messages by git-cliff.
+
 """
 body = """
 {% if version %}\

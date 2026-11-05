@@ -16,9 +16,18 @@ fn main() {
     let sheet = css::parse(&root.collect_styles());
     let fonts = Fonts::load(&sheet.font_faces, dir).expect("fonts");
     let comp = root.find_with_attr("data-composition-id").expect("comp");
-    let w: u32 = comp.attr("data-width").and_then(|v| v.parse().ok()).unwrap_or(1920);
-    let h: u32 = comp.attr("data-height").and_then(|v| v.parse().ok()).unwrap_or(1080);
-    let secs: f32 = comp.attr("data-duration").and_then(|v| v.parse().ok()).unwrap_or(20.0);
+    let w: u32 = comp
+        .attr("data-width")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1920);
+    let h: u32 = comp
+        .attr("data-height")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1080);
+    let secs: f32 = comp
+        .attr("data-duration")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20.0);
     let fps = 30.0f32;
 
     let boxes = layout::Builder::new(&sheet, &fonts)
@@ -68,10 +77,23 @@ fn main() {
 
     let distinct = seen.len();
     println!("frames            : {total}");
-    println!("distinct frames   : {distinct}  ({:.1}% of total)", distinct as f64 / total as f64 * 100.0);
-    println!("identical repeats : {}  ({:.1}% skippable)", total - distinct, (total - distinct) as f64 / total as f64 * 100.0);
+    println!(
+        "distinct frames   : {distinct}  ({:.1}% of total)",
+        distinct as f64 / total as f64 * 100.0
+    );
+    println!(
+        "identical repeats : {}  ({:.1}% skippable)",
+        total - distinct,
+        (total - distinct) as f64 / total as f64 * 100.0
+    );
     println!("runs of change    : {runs}");
     println!();
-    println!("A renderer that draws only distinct frames does {:.1}x less work;", total as f64 / distinct.max(1) as f64);
-    println!("an encoder told which frames repeat spends ~0 bits on {} of them.", total - distinct);
+    println!(
+        "A renderer that draws only distinct frames does {:.1}x less work;",
+        total as f64 / distinct.max(1) as f64
+    );
+    println!(
+        "an encoder told which frames repeat spends ~0 bits on {} of them.",
+        total - distinct
+    );
 }

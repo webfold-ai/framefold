@@ -99,7 +99,9 @@ impl Selector {
     /// each earlier part must match *some* ancestor, in order. Greedy matching
     /// is correct here because descendant combinators impose no adjacency.
     fn matches(&self, path: &[&Element]) -> bool {
-        let Some(last) = path.last() else { return false };
+        let Some(last) = path.last() else {
+            return false;
+        };
         let Some((target, ancestors)) = self.parts.split_last() else {
             return false;
         };
@@ -203,7 +205,11 @@ pub fn parse_color(v: &str) -> Option<crate::raster::Rgba> {
         let a = if parts.len() > 3 {
             let raw = parts[3].trim_end_matches('%');
             let f: f32 = raw.parse().ok()?;
-            let f = if parts[3].ends_with('%') { f / 100.0 } else { f };
+            let f = if parts[3].ends_with('%') {
+                f / 100.0
+            } else {
+                f
+            };
             (f.clamp(0.0, 1.0) * 255.0).round() as u8
         } else {
             255
@@ -279,7 +285,11 @@ impl Stylesheet {
 /// Apply one declaration, expanding the shorthands compositions use.
 fn expand_into(out: &mut HashMap<String, String>, prop: &str, value: &str) {
     let prop = prop.trim().to_ascii_lowercase();
-    let value = value.trim().trim_end_matches("!important").trim().to_string();
+    let value = value
+        .trim()
+        .trim_end_matches("!important")
+        .trim()
+        .to_string();
 
     let sides = |v: &str| -> [String; 4] {
         let parts: Vec<&str> = v.split_whitespace().collect();
@@ -645,7 +655,10 @@ mod tests {
     }
 
     /// Build the ancestor path to the first element matching a predicate.
-    fn path_to<'a>(root: &'a html::Element, pred: &dyn Fn(&html::Element) -> bool) -> Vec<&'a html::Element> {
+    fn path_to<'a>(
+        root: &'a html::Element,
+        pred: &dyn Fn(&html::Element) -> bool,
+    ) -> Vec<&'a html::Element> {
         fn walk<'a>(
             e: &'a html::Element,
             pred: &dyn Fn(&html::Element) -> bool,
@@ -796,7 +809,11 @@ mod tests {
         assert_eq!(length("0.06em", 26.0, 0.0), Some(26.0 * 0.06));
         assert_eq!(length("50%", 16.0, 200.0), Some(100.0));
         assert_eq!(length("0", 16.0, 0.0), Some(0.0));
-        assert_eq!(length("12", 16.0, 0.0), None, "bare numbers are not lengths");
+        assert_eq!(
+            length("12", 16.0, 0.0),
+            None,
+            "bare numbers are not lengths"
+        );
 
         use crate::raster::Rgba;
         assert_eq!(parse_color("#0044ff"), Some(Rgba::rgb(0, 68, 255)));
@@ -805,7 +822,10 @@ mod tests {
             parse_color("rgba(0, 0, 0, 0.5)"),
             Some(Rgba::new(0, 0, 0, 128))
         );
-        assert_eq!(parse_color("#f8f8f8b3"), Some(Rgba::new(248, 248, 248, 179)));
+        assert_eq!(
+            parse_color("#f8f8f8b3"),
+            Some(Rgba::new(248, 248, 248, 179))
+        );
     }
 
     #[test]
