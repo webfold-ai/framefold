@@ -139,7 +139,11 @@ pub fn to_ttf(woff2: &[u8]) -> Result<Vec<u8>, String> {
                 String::from_utf8_lossy(&tag)
             ));
         }
-        let transform_length = if transformed { r.base128()? } else { orig_length };
+        let transform_length = if transformed {
+            r.base128()?
+        } else {
+            orig_length
+        };
         entries.push(TableEntry {
             tag,
             transformed,
@@ -245,13 +249,31 @@ fn reconstruct_glyf(d: &[u8], loca_long: bool) -> Result<(Vec<u8>, Vec<u8>), Str
         return Err("WOFF2: bbox stream shorter than its bitmap".into());
     }
 
-    let mut n_contour = Reader { d: h.take(n_contour_len)?, i: 0 };
-    let mut n_points = Reader { d: h.take(n_points_len)?, i: 0 };
-    let mut flags = Reader { d: h.take(flag_len)?, i: 0 };
-    let mut glyphs = Reader { d: h.take(glyph_len)?, i: 0 };
-    let mut composites = Reader { d: h.take(composite_len)?, i: 0 };
+    let mut n_contour = Reader {
+        d: h.take(n_contour_len)?,
+        i: 0,
+    };
+    let mut n_points = Reader {
+        d: h.take(n_points_len)?,
+        i: 0,
+    };
+    let mut flags = Reader {
+        d: h.take(flag_len)?,
+        i: 0,
+    };
+    let mut glyphs = Reader {
+        d: h.take(glyph_len)?,
+        i: 0,
+    };
+    let mut composites = Reader {
+        d: h.take(composite_len)?,
+        i: 0,
+    };
     let bbox_block = h.take(bbox_len)?;
-    let mut instructions = Reader { d: h.take(instruction_len)?, i: 0 };
+    let mut instructions = Reader {
+        d: h.take(instruction_len)?,
+        i: 0,
+    };
 
     let bbox_bitmap = &bbox_block[..bbox_bitmap_size];
     let mut bbox_stream = Reader {
@@ -301,7 +323,11 @@ fn reconstruct_glyf(d: &[u8], loca_long: bool) -> Result<(Vec<u8>, Vec<u8>), Str
                 const WE_HAVE_AN_X_AND_Y_SCALE: u16 = 0x0040;
                 const WE_HAVE_A_TWO_BY_TWO: u16 = 0x0080;
                 const WE_HAVE_INSTRUCTIONS: u16 = 0x0100;
-                composites.take(if flags_word & ARG_1_AND_2_ARE_WORDS != 0 { 4 } else { 2 })?;
+                composites.take(if flags_word & ARG_1_AND_2_ARE_WORDS != 0 {
+                    4
+                } else {
+                    2
+                })?;
                 if flags_word & WE_HAVE_A_SCALE != 0 {
                     composites.take(2)?;
                 } else if flags_word & WE_HAVE_AN_X_AND_Y_SCALE != 0 {
@@ -625,13 +651,19 @@ mod tests {
 
     #[test]
     fn outlines_are_recovered_from_the_glyf_transform() {
-        let Some(w) = load("space-mono-latin.woff2") else { return };
+        let Some(w) = load("space-mono-latin.woff2") else {
+            return;
+        };
         let font = ruler::ttf::Font::parse(to_ttf(&w).unwrap()).unwrap();
         // 'o' is two contours in essentially every Latin face; this is the
         // strongest cheap signal that the transform reversal is correct rather
         // than merely producing well-formed garbage.
         let o = font.outline(font.glyph_id('o')).unwrap();
-        assert_eq!(o.len(), 2, "lowercase o should be an outer and inner contour");
+        assert_eq!(
+            o.len(),
+            2,
+            "lowercase o should be an outer and inner contour"
+        );
         for c in &o {
             assert!(c.len() >= 4);
             for p in c {
@@ -646,7 +678,9 @@ mod tests {
 
     #[test]
     fn space_mono_is_actually_monospaced() {
-        let Some(w) = load("space-mono-latin.woff2") else { return };
+        let Some(w) = load("space-mono-latin.woff2") else {
+            return;
+        };
         let font = ruler::ttf::Font::parse(to_ttf(&w).unwrap()).unwrap();
         // The name is a testable claim: every Latin glyph must share an advance.
         // If hmtx were mis-sliced this would fail loudly.
@@ -662,14 +696,19 @@ mod tests {
 
     #[test]
     fn variable_font_converts_and_maps() {
-        let Some(w) = load("space-grotesk-latin.woff2") else { return };
+        let Some(w) = load("space-grotesk-latin.woff2") else {
+            return;
+        };
         let font = ruler::ttf::Font::parse(to_ttf(&w).unwrap()).expect("parse Space Grotesk");
         assert!(font.num_glyphs() > 100);
         assert_ne!(font.glyph_id('g'), 0);
         // Proportional, unlike Space Mono above.
         let i = font.advance(font.glyph_id('i'), 100.0).unwrap();
         let m = font.advance(font.glyph_id('M'), 100.0).unwrap();
-        assert!(m > i * 1.5, "expected proportional advances, got i={i} M={m}");
+        assert!(
+            m > i * 1.5,
+            "expected proportional advances, got i={i} M={m}"
+        );
     }
 
     #[test]

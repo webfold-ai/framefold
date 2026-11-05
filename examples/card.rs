@@ -22,8 +22,18 @@ fn main() {
         }
     };
 
-    let env = |k: &str, d: u32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
-    let (w, h, fps, seconds) = (env("FF_W", 1280), env("FF_H", 720), env("FF_FPS", 30), env("FF_SECS", 4));
+    let env = |k: &str, d: u32| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(d)
+    };
+    let (w, h, fps, seconds) = (
+        env("FF_W", 1280),
+        env("FF_H", 720),
+        env("FF_FPS", 30),
+        env("FF_SECS", 4),
+    );
     let total = fps * seconds;
 
     let threads = std::env::var("FRAMEFOLD_THREADS")
@@ -40,9 +50,8 @@ fn main() {
 
             // Two staggered reveals, each eased independently — the shape a
             // real composition's timeline produces.
-            let stage = |start: f32, len: f32| -> f32 {
-                (((t - start) / len).clamp(0.0, 1.0)).powf(0.4)
-            };
+            let stage =
+                |start: f32, len: f32| -> f32 { (((t - start) / len).clamp(0.0, 1.0)).powf(0.4) };
             let card_t = stage(0.00, 0.45);
             let text_t = stage(0.20, 0.45);
 

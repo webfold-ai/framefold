@@ -144,9 +144,12 @@ fn rendered_frames_encode_to_a_playable_mp4() {
 
     let out = Command::new("ffprobe")
         .args([
-            "-v", "error",
-            "-show_entries", "stream=codec_name,width,height",
-            "-of", "csv=p=0",
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_name,width,height",
+            "-of",
+            "csv=p=0",
         ])
         .arg(&path)
         .output()
@@ -159,15 +162,21 @@ fn rendered_frames_encode_to_a_playable_mp4() {
     let info = String::from_utf8_lossy(&out.stdout);
     assert!(info.contains("h264"), "no h264 stream: {info}");
     assert!(info.contains("aac"), "no aac stream: {info}");
-    assert!(info.contains("320") && info.contains("180"), "wrong size: {info}");
+    assert!(
+        info.contains("320") && info.contains("180"),
+        "wrong size: {info}"
+    );
 
     // Decode every frame back out — a container can advertise streams it cannot
     // deliver, so listing them is not proof.
     let decoded = Command::new("ffmpeg")
-        .arg("-v").arg("error")
-        .arg("-i").arg(&path)
+        .arg("-v")
+        .arg("error")
+        .arg("-i")
+        .arg(&path)
         .args(["-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba"])
-        .arg("-y").arg("/dev/null")
+        .arg("-y")
+        .arg("/dev/null")
         .status()
         .expect("spawn ffmpeg");
     assert!(decoded.success(), "ffmpeg could not decode the video track");

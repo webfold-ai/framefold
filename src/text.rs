@@ -74,7 +74,11 @@ pub struct LaidLine {
 /// Break `text` into lines that fit `max_width`, honouring existing newlines.
 ///
 /// `max_width` of `None` means "never wrap" — only explicit newlines break.
-pub fn layout(style: &TextStyle, text: &str, max_width: Option<f32>) -> Result<Vec<LaidLine>, String> {
+pub fn layout(
+    style: &TextStyle,
+    text: &str,
+    max_width: Option<f32>,
+) -> Result<Vec<LaidLine>, String> {
     let mut out = Vec::new();
     for paragraph in text.split('\n') {
         if paragraph.is_empty() {
@@ -281,7 +285,11 @@ mod tests {
             sum as f32 / n as f32
         };
 
-        let (l, c, r) = (centroid(Align::Left), centroid(Align::Center), centroid(Align::Right));
+        let (l, c, r) = (
+            centroid(Align::Left),
+            centroid(Align::Center),
+            centroid(Align::Right),
+        );
         assert!(l < c && c < r, "left {l} center {c} right {r}");
     }
 

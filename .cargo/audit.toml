@@ -1,40 +1,8 @@
-# cargo-audit configuration for ptyktos-coding-agent.
+# cargo-audit configuration for framefold.
 #
-# Path matters: cargo-audit reads `.cargo/audit.toml`, not a root-level
-# `audit.toml`. A file at the repo root is silently ignored.
-#
-# The `supply-chain` job in .github/workflows/supply-chain.yml is a BLOCKING
-# gate. It runs on every PR touching Rust and nightly on the schedule.
-#
-# Anything ignored here must be listed explicitly, with a reason. Hidden
-# ignore lists let CVEs sit in green CI runs (RUSTSEC-2026-0258 in h2
-# sat green until the explicit ignore policy was introduced elsewhere).
+# cargo-audit reads .cargo/audit.toml, not a root-level audit.toml.
+# Every ignored advisory must be listed here with a reason. None is ignored
+# yet: run `cargo audit` and add an entry only with a written justification.
 
 [advisories]
-ignore = [
-    # `paste` is unmaintained — an advisory of project status, not a
-    # vulnerability; there is no patched version to move to. It is
-    # transitive and unavoidable at our layer. Re-evaluate when tokenizers
-    # moves to `pastey` (the maintained drop-in fork).
-    "RUSTSEC-2024-0436",
-]
-
-# Database source: the official RustSec advisory database.
-# The `git-fetch-with-cli = true` setting in ~/.cargo/config.toml means cargo-audit
-# uses the git CLI to fetch this repo, which authenticates over HTTPS to
-# GitHub. Without it, libgit2 fails to authenticate to gitlab.tas.twn.network
-# (the private mirror we use for some substrate crates) and the audit step
-# fails with "authentication required" instead of producing a result.
-database.source = "https://github.com/rustsec/advisory-db.git"
-database.fetch_delay = "time::duration::hours=12"
-
-# The `informational_warnings` setting means `cargo audit` exits 0 even if
-# unmaintained warnings are present (those are not vulnerabilities, just
-# project-state advisories). Vulnerabilities still fail the build.
-informational_warnings = ["unmaintained", "notice"]
-
-# Dataflow surface: list the crates whose transitive deps include
-# known-vulnerable-but-accepted-risk advisories. caretakers records these
-# in the dependency graph and surfaces them in the supply-chain evidence
-# stream.
-dataflow = ["light"]
+ignore = []

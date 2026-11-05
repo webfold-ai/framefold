@@ -14,9 +14,9 @@
 //! metrics come from the font's own `hhea`.
 
 use crate::css::length;
+use crate::fonts::{weight_value, Fonts};
 use crate::layout::Boxes;
 use crate::raster::{Canvas, Rect, Rgba};
-use crate::fonts::{weight_value, Fonts};
 
 /// Per-element visual overrides applied at paint time.
 ///
@@ -152,7 +152,16 @@ pub fn paint(
     fonts: &Fonts,
     animator: &dyn Animator,
 ) -> Result<(), String> {
-    paint_box(canvas, root, fonts, animator, 1.0, (0.0, 0.0), None, Xform::IDENTITY)
+    paint_box(
+        canvas,
+        root,
+        fonts,
+        animator,
+        1.0,
+        (0.0, 0.0),
+        None,
+        Xform::IDENTITY,
+    )
 }
 
 /// An accumulated uniform scale about a fixed origin.
@@ -217,9 +226,7 @@ impl Xform {
                 origin: self.origin,
             };
         }
-        let solve = |o1: f32, o2: f32| {
-            (o2 + (o1 - o2) * scale - o1 * total) / denom
-        };
+        let solve = |o1: f32, o2: f32| (o2 + (o1 - o2) * scale - o1 * total) / denom;
         Xform {
             scale: total,
             origin: (
@@ -317,12 +324,7 @@ fn paint_box(
     }
 
     let offset = (offset.0 + ov.translate.0, offset.1 + ov.translate.1);
-    let untransformed = Rect::new(
-        b.rect.x + offset.0,
-        b.rect.y + offset.1,
-        b.rect.w,
-        b.rect.h,
-    );
+    let untransformed = Rect::new(b.rect.x + offset.0, b.rect.y + offset.1, b.rect.w, b.rect.h);
 
     // A scale applies about the element's transform-origin and then carries
     // into the subtree, so it is accumulated rather than applied to this box
@@ -621,7 +623,10 @@ mod tests {
             10,
         );
         let a = c.pixel(5, 5).a;
-        assert!((55..=73).contains(&a), "0.5*0.5 should be ~25% alpha, got {a}");
+        assert!(
+            (55..=73).contains(&a),
+            "0.5*0.5 should be ~25% alpha, got {a}"
+        );
     }
 
     #[test]
@@ -762,7 +767,9 @@ mod tests {
 
     #[test]
     fn hidden_scenes_do_not_paint() {
-        let Some((_, boxes)) = real_frame() else { return };
+        let Some((_, boxes)) = real_frame() else {
+            return;
+        };
         for id in ["s2", "s3", "s4"] {
             let s = boxes.find_id(id).unwrap();
             assert_eq!(
@@ -778,7 +785,10 @@ mod tests {
             .chunks_exact(4)
             .filter(|p| p[0] == 27 && p[1] == 27 && p[2] == 31)
             .count();
-        assert_eq!(outro_bg, 0, "the hidden outro background leaked into frame 0");
+        assert_eq!(
+            outro_bg, 0,
+            "the hidden outro background leaked into frame 0"
+        );
     }
 }
 
@@ -824,7 +834,9 @@ mod xform_tests {
 
     #[test]
     fn cancelling_scales_do_not_divide_by_zero() {
-        let x = Xform::IDENTITY.then_scale(2.0, (10.0, 10.0)).then_scale(0.5, (90.0, 90.0));
+        let x = Xform::IDENTITY
+            .then_scale(2.0, (10.0, 10.0))
+            .then_scale(0.5, (90.0, 90.0));
         assert!((x.scale - 1.0).abs() < 1e-4);
         assert!(x.point(5.0, 5.0).0.is_finite());
     }
