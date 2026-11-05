@@ -7,6 +7,11 @@ All notable changes to framefold are listed here. Format follows [Keep a Changel
 ### Added
 
 - Public-release documentation: README, licence, contribution, conduct and security policies.
+- README: scope statement, JavaScript-engine disclosure, composition format, supported subset, dependency table and known issues.
+
+### Changed
+
+- Repository links in user-facing documentation now point at `webfold-ai/framefold`.
 
 ## [0.1.0]
 

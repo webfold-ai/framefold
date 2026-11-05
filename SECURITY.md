@@ -4,7 +4,7 @@
 
 Please report security problems privately. Do not open a public issue or pull request.
 
-- Use GitHub's private vulnerability reporting for this repository: https://github.com/Ptyktos/framefold/security/advisories/new
+- Use GitHub's private vulnerability reporting for this repository: https://github.com/webfold-ai/framefold/security/advisories/new
 - Or email the security team at security@twn.systems.
 
 Include a description of the problem, the affected version or commit, steps to reproduce, and the impact as you understand it.
