@@ -1,5 +1,7 @@
 # framefold
 
+> **Status: research build.** This code is not production-ready. It is being hardened toward a production release, and interfaces, formats and results may change without notice.
+
 framefold renders an HTML-style composition to video frames without starting a browser. It parses a bounded subset of HTML and CSS, lays the boxes out, runs the composition's timeline script, paints the frames with its own rasterizer, and hands RGBA frames to `transcode` for H.264/AAC MP4 encoding.
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
