@@ -3,7 +3,7 @@
 ## Dependencies
 
 - `ruler` (git, `https://github.com/Ptyktos/ruler`, pinned rev): text geometry and TrueType outlines.
-- `transcode` (git, pinned rev): H.264/AAC encoding and MP4 muxing. The pin must point at a reachable commit that provides the APIs framefold uses. See the blocker in the pull request.
+- `transcode` (git, pinned rev): H.264/AAC encoding and MP4 muxing. The pin must point at a reachable commit that provides the APIs framefold uses.
 - `brotli` (crates.io): WOFF2 decoding.
 - `rquickjs` (crates.io, optional, default feature `js`): timeline script execution.
 
@@ -26,10 +26,10 @@ A draft GitHub release is created from a `v*` tag. The archive, `SHA256SUMS`, co
 sha256sum -c SHA256SUMS
 cosign verify-blob \
   --bundle framefold-v0.1.0-linux-x86_64.tar.gz.sigstore.json \
-  --certificate-identity 'https://github.com/Ptyktos/framefold/.github/workflows/release.yml@refs/tags/v0.1.0' \
+  --certificate-identity 'https://github.com/webfold-ai/framefold/.github/workflows/release.yml@refs/tags/v0.1.0' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   framefold-v0.1.0-linux-x86_64.tar.gz
-gh attestation verify framefold-v0.1.0-linux-x86_64.tar.gz --repo Ptyktos/framefold
+gh attestation verify framefold-v0.1.0-linux-x86_64.tar.gz --repo webfold-ai/framefold
 ```
 
 These commands have not been run against a real release.

@@ -1,7 +1,7 @@
 # configuration for https://github.com/orhun/git-cliff
 
 [remote.github]
-owner = "Ptyktos"
+owner = "webfold-ai"
 repo = "framefold"
 
 [changelog]
