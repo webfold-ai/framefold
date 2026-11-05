@@ -27,10 +27,13 @@
 //! rectangles, source-over alpha, and text drawn from real TrueType outlines
 //! via `ruler`.
 //!
-//! Absent, deliberately, and not faked: CSS parsing and cascade, flex/grid
-//! layout, a JavaScript runtime, images, gradients, blurs, and general path
-//! stroking (only rectangle borders are stroked). Those are separate pieces;
-//! this crate draws what it is told to draw.
+//! Implemented: a tolerant HTML parser for the subset compositions use, CSS parsing
+//! and cascade for the subset real stylesheets specify, block and flex layout,
+//! text drawn from TrueType outlines via `ruler` (WOFF2 via `woff2`), and timeline
+//! extraction by running the composition's script under the `js` feature.
+//!
+//! Not implemented: grid, floats, tables, images, gradients, blurs, and general path
+//! stroking (only rectangle borders are stroked). See `layout.rs` for the layout gaps.
 
 pub mod css;
 pub mod fonts;

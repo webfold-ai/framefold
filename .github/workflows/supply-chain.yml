@@ -1,99 +1,72 @@
-name: supply-chain
+name: Supply chain
 
 on:
   pull_request:
     paths:
-      - '**/*.toml'
-      - '**/*.lock'
-      - 'Cargo.toml'
-      - '**/Cargo.toml'
-      - 'native/**'
-      - 'src/**'
-      - 'upstream/**'
-      - 'extensions/**'
+      - "**/*.toml"
+      - "**/*.lock"
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/supply-chain.yml"
+      - "deny.toml"
+      - ".cargo/audit.toml"
   push:
-    branches: [main, 'release/**']
+    branches: [main]
   schedule:
-    # Run daily at 06:13 UTC. RUSTSEC advisories land throughout the day;
-    # a stale green run is the worst outcome (no one sees the CVE).
-    - cron: '13 6 * * *'
+    - cron: "13 6 * * *"
   workflow_dispatch:
-
-env:
-  CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
 
 permissions:
   contents: read
 
 jobs:
-  # Three coordinated gates — all must pass for the workflow to succeed.
-  # caretakers (Ptyktos/caretaker) consumes these three signals and the
-  # upstream evidence JSON for the supply-chain-control decision; a red
-  # signal on any of them blocks release-pr from merging.
-
   audit:
-    name: cargo audit (rustsec)
+    name: RustSec audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-cargo-audit-action@v2
-      - name: Run cargo audit (BLOCKING on vulnerabilities)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@599c45df1a24c1c63ae1129a7e59f46654b8fb66 # 1.89.0 branch
+        with:
+          toolchain: 1.89.0
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+      - name: Audit
         run: cargo audit --deny warnings
 
   deny:
-    name: cargo deny (licenses, sources, yanked)
+    name: Dependency policy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Run cargo-deny (BLOCKING on policy violations)
-        uses: EmbarkStudios/cargo-deny-action@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@599c45df1a24c1c63ae1129a7e59f46654b8fb66 # 1.89.0 branch
+        with:
+          toolchain: 1.89.0
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny --version 0.19.4
+      - name: Check dependency policy
+        run: cargo deny check advisories bans licenses sources
 
   sbom:
-    name: SBOM + Provenance
+    name: CycloneDX SBOM
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install cyclonedx-bom
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@599c45df1a24c1c63ae1129a7e59f46654b8fb66 # 1.89.0 branch
+        with:
+          toolchain: 1.89.0
+      - name: Install cargo-cyclonedx
         run: cargo install --locked cargo-cyclonedx
-      - name: Generate CycloneDX SBOM
-        run: cargo cyclonedx --format json --output-filename ptyktos-coding-agent.sbom.json
-      - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+      - name: Generate SBOM
+        # --override-filename is a prefix; cargo-cyclonedx appends the extension.
+        run: cargo cyclonedx --format json --override-filename framefold.sbom
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ptyktos-coding-agent-sbom
-          path: ptyktos-coding-agent.sbom.json
+          name: framefold-cyclonedx-sbom
+          path: framefold.sbom.json
           retention-days: 90
-
-  # caretakers-specific bridge — the cross-repo compliance signal that
-  # Ptyktos/caretaker consumes. caretakers records the SBOM + the audit
-  # + the deny result into the supply-chain evidence stream; the release
-  # gate reads them at merge-time.
-  evidence:
-    name: Emit supply-chain evidence (for caretakers)
-    runs-on: ubuntu-latest
-    if: always()
-    needs: [audit, deny, sbom]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Build evidence payload
-        run: |
-          mkdir -p evidence
-          {
-            echo "{"
-            echo "  \"event\": \"ptyktos.supply_chain.audit\","
-            echo "  \"ts\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\","
-            echo "  \"repo\": \"Ptyktos/ptyktos-coding-agent\","
-            echo "  \"audit\": \"${{ needs.audit.result }}\","
-            echo "  \"deny\": \"${{ needs.deny.result }}\","
-            echo "  \"sbom_path\": \"ptyktos-coding-agent.sbom.json\""
-            echo "}"
-          } > evidence/supply-chain.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: supply-chain-evidence
-          path: evidence/supply-chain.json
