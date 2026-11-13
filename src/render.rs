@@ -133,7 +133,11 @@ mod tests {
         });
         assert_eq!(frames.len(), 128);
         for (i, c) in calls.iter().enumerate() {
-            assert_eq!(c.load(Ordering::Relaxed), 1, "index {i} rendered twice or never");
+            assert_eq!(
+                c.load(Ordering::Relaxed),
+                1,
+                "index {i} rendered twice or never"
+            );
         }
     }
 }
@@ -162,13 +166,7 @@ mod tests {
 ///
 /// `reduce` is handed the frame index and a cleared canvas, and returns
 /// whatever small value that frame becomes.
-pub fn fold_frames<T, F>(
-    count: usize,
-    threads: usize,
-    width: u32,
-    height: u32,
-    reduce: F,
-) -> Vec<T>
+pub fn fold_frames<T, F>(count: usize, threads: usize, width: u32, height: u32, reduce: F) -> Vec<T>
 where
     T: Send,
     F: Fn(usize, &mut crate::raster::Canvas) -> T + Sync,
@@ -272,6 +270,9 @@ mod budget_tests {
     fn a_smaller_frame_buys_more_workers_for_the_same_budget() {
         let hd = threads_for_budget(128, 1920, 1080);
         let sd = threads_for_budget(128, 640, 360);
-        assert!(sd >= hd, "smaller frames are cheaper per worker: {sd} vs {hd}");
+        assert!(
+            sd >= hd,
+            "smaller frames are cheaper per worker: {sd} vs {hd}"
+        );
     }
 }

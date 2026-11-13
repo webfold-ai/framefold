@@ -29,7 +29,9 @@ const FPS: f32 = 30.0;
 /// Frames sampled across the timeline. Spread rather than contiguous: the
 /// interesting variation is between scenes and through transitions, not
 /// between neighbours.
-const SAMPLES: &[usize] = &[1, 30, 60, 105, 150, 210, 240, 300, 360, 420, 480, 510, 540, 570, 599];
+const SAMPLES: &[usize] = &[
+    1, 30, 60, 105, 150, 210, 240, 300, 360, 420, 480, 510, 540, 570, 599,
+];
 
 /// Mean SSIM the renderer must hold across the sampled frames.
 ///
@@ -72,7 +74,13 @@ fn build() -> Option<Fixture> {
         .layout(comp, Rect::new(0.0, 0.0, width as f32, height as f32))
         .ok()?;
     let timeline = timeline::extract(comp, &root.collect_inline_scripts()).ok()?;
-    Some(Fixture { boxes, fonts, timeline, width, height })
+    Some(Fixture {
+        boxes,
+        fonts,
+        timeline,
+        width,
+        height,
+    })
 }
 
 fn render_at(f: &Fixture, frame: usize) -> Canvas {
@@ -95,7 +103,11 @@ fn reference(frame: usize) -> Option<transcode::Image> {
 }
 
 fn as_image(c: Canvas) -> transcode::Image {
-    transcode::Image { width: c.width, height: c.height, pixels: c.data }
+    transcode::Image {
+        width: c.width,
+        height: c.height,
+        pixels: c.data,
+    }
 }
 
 #[test]
@@ -111,7 +123,9 @@ fn no_visual_regression_against_hyperframes() {
 
     let mut scores = Vec::new();
     for &frame in SAMPLES {
-        let Some(want) = reference(frame) else { continue };
+        let Some(want) = reference(frame) else {
+            continue;
+        };
         let got = as_image(render_at(&f, frame));
         assert_eq!(
             (got.width, got.height),
@@ -131,9 +145,15 @@ fn no_visual_regression_against_hyperframes() {
         .copied()
         .unwrap();
 
-    eprintln!("parity over {} frames: mean {mean:.4}, worst {worst:.4} (frame {worst_frame})", scores.len());
+    eprintln!(
+        "parity over {} frames: mean {mean:.4}, worst {worst:.4} (frame {worst_frame})",
+        scores.len()
+    );
     for (frame, s) in &scores {
-        eprintln!("  frame {frame:>4}  t={:5.2}s  SSIM {s:.4}", (*frame - 1) as f32 / FPS);
+        eprintln!(
+            "  frame {frame:>4}  t={:5.2}s  SSIM {s:.4}",
+            (*frame - 1) as f32 / FPS
+        );
     }
 
     // On failure, say *where* the worst frame disagrees. A scalar cannot
@@ -163,7 +183,10 @@ fn no_visual_regression_against_hyperframes() {
         }
     }
 
-    assert!(mean >= MEAN_FLOOR, "mean SSIM {mean:.4} below floor {MEAN_FLOOR}");
+    assert!(
+        mean >= MEAN_FLOOR,
+        "mean SSIM {mean:.4} below floor {MEAN_FLOOR}"
+    );
     assert!(
         worst >= WORST_FLOOR,
         "frame {worst_frame} SSIM {worst:.4} below floor {WORST_FLOOR}"
@@ -197,9 +220,11 @@ fn collapsing_repeat_frames_changes_nothing() {
         let a = render_at(&f, i); // frame numbers are 1-based -> time (i-1)/fps
         let b = render_at(&f, i + 1);
         assert_eq!(
-            a.data, b.data,
+            a.data,
+            b.data,
             "plan claims frames {} and {} are identical, but they render differently",
-            i, i + 1
+            i,
+            i + 1
         );
         checked += 1;
     }

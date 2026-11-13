@@ -39,7 +39,9 @@ fn main() {
         Some(_) => "render",
         None => usage(),
     };
-    let Some(dir) = args.first().cloned() else { usage() };
+    let Some(dir) = args.first().cloned() else {
+        usage()
+    };
     let out = if cmd == "probe" {
         String::new()
     } else {
@@ -72,15 +74,23 @@ fn main() {
     let comp = root
         .find_with_attr("data-composition-id")
         .expect("no data-composition-id");
-    let w: u32 = comp.attr("data-width").and_then(|v| v.parse().ok()).unwrap_or(1920);
-    let h: u32 = comp.attr("data-height").and_then(|v| v.parse().ok()).unwrap_or(1080);
+    let w: u32 = comp
+        .attr("data-width")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1920);
+    let h: u32 = comp
+        .attr("data-height")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1080);
     let declared: f32 = comp
         .attr("data-duration")
         .and_then(|v| v.parse().ok())
         .unwrap_or(10.0);
 
     let fps = flag("--fps").unwrap_or_else(|| {
-        comp.attr("data-fps").and_then(|v| v.parse().ok()).unwrap_or(30.0)
+        comp.attr("data-fps")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30.0)
     });
     let seconds = flag("--seconds").unwrap_or(declared);
 
@@ -207,7 +217,6 @@ fn main() {
         encoded as f64 / 1_048_576.0
     );
 }
-
 
 /// Report progress on stderr, once per whole percent.
 ///

@@ -22,7 +22,11 @@ impl paint::Animator for RevealAll {
     fn for_id(&self, id: Option<&str>) -> paint::Overrides {
         let opacity = match (&self.only, id) {
             (Some(want), Some(this)) if self.scenes.iter().any(|s| s == this) => {
-                if this == want { 1.0 } else { 0.0 }
+                if this == want {
+                    1.0
+                } else {
+                    0.0
+                }
             }
             _ => 1.0,
         };
@@ -74,8 +78,14 @@ fn main() {
     let comp = root
         .find_with_attr("data-composition-id")
         .expect("no data-composition-id in this composition");
-    let w: u32 = comp.attr("data-width").and_then(|v| v.parse().ok()).unwrap_or(1920);
-    let h: u32 = comp.attr("data-height").and_then(|v| v.parse().ok()).unwrap_or(1080);
+    let w: u32 = comp
+        .attr("data-width")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1920);
+    let h: u32 = comp
+        .attr("data-height")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1080);
 
     let t = std::time::Instant::now();
     let boxes = layout::Builder::new(&sheet, &fonts)
@@ -93,9 +103,16 @@ fn main() {
             "timeline: {} tweens over {:.2}s{}",
             tl.tweens.len(),
             tl.duration,
-            if tl.uses_blur() { "  (uses blur — not yet rendered)" } else { "" }
+            if tl.uses_blur() {
+                "  (uses blur — not yet rendered)"
+            } else {
+                ""
+            }
         );
-        let anim = framefold::timeline::FrameAnimator { timeline: &tl, time: t };
+        let anim = framefold::timeline::FrameAnimator {
+            timeline: &tl,
+            time: t,
+        };
         paint::paint(&mut canvas, &boxes, &fonts, &anim).expect("paint");
     } else if reveal || only.is_some() {
         let scenes: Vec<String> = comp

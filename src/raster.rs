@@ -407,7 +407,12 @@ impl Canvas {
 
     pub fn pixel(&self, x: u32, y: u32) -> Rgba {
         let i = (y as usize * self.width as usize + x as usize) * 4;
-        Rgba::new(self.data[i], self.data[i + 1], self.data[i + 2], self.data[i + 3])
+        Rgba::new(
+            self.data[i],
+            self.data[i + 1],
+            self.data[i + 2],
+            self.data[i + 3],
+        )
     }
 
     /// Fill a path with a solid colour, optionally clipped.
@@ -477,7 +482,8 @@ impl Canvas {
                 if crossings.len() < 2 {
                     continue;
                 }
-                crossings.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                crossings
+                    .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
                 // Nonzero winding: a run is inside while the accumulated
                 // direction count is non-zero.
@@ -588,8 +594,8 @@ impl Canvas {
         }
         let w = width.min(rect.w).min(rect.h);
         let sides = [
-            Rect::new(rect.x, rect.y, rect.w, w),                       // top
-            Rect::new(rect.x, rect.bottom() - w, rect.w, w),            // bottom
+            Rect::new(rect.x, rect.y, rect.w, w),            // top
+            Rect::new(rect.x, rect.bottom() - w, rect.w, w), // bottom
             Rect::new(rect.x, rect.y + w, w, (rect.h - 2.0 * w).max(0.0)), // left
             Rect::new(rect.right() - w, rect.y + w, w, (rect.h - 2.0 * w).max(0.0)), // right
         ];
@@ -659,7 +665,9 @@ fn blend(dst: &mut [u8], color: Rgba, a: f32) {
     let mix = |s: u8, d: u8| -> u8 {
         let s = s as f32;
         let d = d as f32;
-        (((s * a) + (d * da * inv)) / out_a).round().clamp(0.0, 255.0) as u8
+        (((s * a) + (d * da * inv)) / out_a)
+            .round()
+            .clamp(0.0, 255.0) as u8
     };
     dst[0] = mix(color.r, dst[0]);
     dst[1] = mix(color.g, dst[1]);
@@ -738,7 +746,12 @@ mod tests {
     fn clip_limits_drawing() {
         let mut c = Canvas::new(20, 20);
         let clip = Rect::new(0.0, 0.0, 10.0, 20.0);
-        c.fill_rect(Rect::new(0.0, 0.0, 20.0, 20.0), Rgba::WHITE, 1.0, Some(clip));
+        c.fill_rect(
+            Rect::new(0.0, 0.0, 20.0, 20.0),
+            Rgba::WHITE,
+            1.0,
+            Some(clip),
+        );
         assert_eq!(c.pixel(9, 10).a, 255);
         assert_eq!(c.pixel(10, 10).a, 0, "clip must cut the fill");
         assert_eq!(ink(&c), 10 * 20);
@@ -776,11 +789,20 @@ mod tests {
     #[test]
     fn round_rect_corners_are_cut() {
         let mut c = Canvas::new(40, 40);
-        c.fill_round_rect(Rect::new(0.0, 0.0, 40.0, 40.0), 12.0, Rgba::WHITE, 1.0, None);
+        c.fill_round_rect(
+            Rect::new(0.0, 0.0, 40.0, 40.0),
+            12.0,
+            Rgba::WHITE,
+            1.0,
+            None,
+        );
         assert_eq!(c.pixel(20, 20).a, 255, "centre filled");
         assert_eq!(c.pixel(0, 0).a, 0, "corner cut away");
         assert_eq!(c.pixel(39, 0).a, 0);
-        assert!(ink(&c) < 1600, "a rounded rect covers less than the full square");
+        assert!(
+            ink(&c) < 1600,
+            "a rounded rect covers less than the full square"
+        );
         assert!(ink(&c) > 1300, "but not dramatically less");
     }
 
@@ -788,8 +810,17 @@ mod tests {
     fn radius_is_clamped_not_inverted() {
         let mut c = Canvas::new(20, 20);
         // Radius far larger than the rect — must degrade gracefully.
-        c.fill_round_rect(Rect::new(0.0, 0.0, 20.0, 10.0), 999.0, Rgba::WHITE, 1.0, None);
-        assert!(ink(&c) > 0, "an over-large radius must still draw something");
+        c.fill_round_rect(
+            Rect::new(0.0, 0.0, 20.0, 10.0),
+            999.0,
+            Rgba::WHITE,
+            1.0,
+            None,
+        );
+        assert!(
+            ink(&c) > 0,
+            "an over-large radius must still draw something"
+        );
         assert_eq!(c.pixel(10, 5).a, 255, "centre still filled");
     }
 
@@ -1026,7 +1057,9 @@ fn downsample(src: &[u8], sw: u32, sh: u32, dst: &mut [u8], dw: u32, dh: u32) {
     let fy = sh as f32 / dh as f32;
     for y in 0..dh as usize {
         let y0 = (y as f32 * fy) as usize;
-        let y1 = (((y + 1) as f32 * fy) as usize).min(sh as usize).max(y0 + 1);
+        let y1 = (((y + 1) as f32 * fy) as usize)
+            .min(sh as usize)
+            .max(y0 + 1);
         for x in 0..dw as usize {
             let x0 = (x as f32 * fx) as usize;
             let x1 = (((x + 1) as f32 * fx) as usize).min(s_w).max(x0 + 1);

@@ -39,8 +39,7 @@ impl Fonts {
             let bytes = std::fs::read(&path)
                 .map_err(|e| format!("font {}: cannot read {}: {e}", f.family, path.display()))?;
             let ttf = if bytes.starts_with(b"wOF2") {
-                crate::woff2::to_ttf(&bytes)
-                    .map_err(|e| format!("font {}: {e}", f.family))?
+                crate::woff2::to_ttf(&bytes).map_err(|e| format!("font {}: {e}", f.family))?
             } else {
                 bytes
             };
@@ -235,7 +234,9 @@ mod tests {
 
     #[test]
     fn bold_and_regular_mono_are_distinct_faces() {
-        let Some((faces, dir)) = real_faces() else { return };
+        let Some((faces, dir)) = real_faces() else {
+            return;
+        };
         let fonts = Fonts::load(&faces, &dir).unwrap();
         let regular = fonts.resolve("\"Space Mono\"", 400.0).unwrap();
         let bold = fonts.resolve("\"Space Mono\"", 700.0).unwrap();
@@ -252,12 +253,18 @@ mod tests {
 
     #[test]
     fn unknown_family_falls_through_the_stack() {
-        let Some((faces, dir)) = real_faces() else { return };
+        let Some((faces, dir)) = real_faces() else {
+            return;
+        };
         let fonts = Fonts::load(&faces, &dir).unwrap();
         // First name is undeclared, second is real — CSS says the second wins.
-        assert!(fonts.resolve("\"Nonexistent\", \"Space Mono\"", 400.0).is_some());
+        assert!(fonts
+            .resolve("\"Nonexistent\", \"Space Mono\"", 400.0)
+            .is_some());
         // Nothing declared and no fallback installed.
-        assert!(fonts.resolve("\"Nonexistent\", sans-serif", 400.0).is_none());
+        assert!(fonts
+            .resolve("\"Nonexistent\", sans-serif", 400.0)
+            .is_none());
     }
 
     #[test]

@@ -3,7 +3,12 @@ name = "framefold"
 version = "0.1.0"
 edition = "2021"
 description = "Native compositor: HTML-style compositions to video frames, no browser"
-license-file = "LICENSE"
+license = "Apache-2.0"
+repository = "https://github.com/Ptyktos/framefold"
+readme = "README.md"
+keywords = ["video", "compositing", "rendering", "html", "css"]
+categories = ["multimedia::video", "graphics"]
+rust-version = "1.89"
 
 # The renderer as a binary, so a host can run it out-of-process. A 1080p render
 # is CPU-heavy and memory-heavy; isolating it means a failure costs one job
