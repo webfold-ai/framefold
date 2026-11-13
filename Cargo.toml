@@ -27,7 +27,7 @@ brotli = { version = "8", default-features = false, features = ["std"] }
 rquickjs = { version = "0.10", features = ["bindgen"], optional = true }
 # Encoding and muxing. A real dependency rather than dev-only, now that the
 # renderer ships as a runnable binary and not just a library plus tests.
-transcode = { git = "https://github.com/Ptyktos/transcode", rev = "f855e4217105863354f58c1d1c840685fff6e44b" }
+transcode = { git = "https://github.com/Ptyktos/transcode", rev = "8e65c5afeb8adb9663511760b80e19156970207e" }
 
 [features]
 default = ["js"]
