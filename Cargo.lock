@@ -516,7 +516,7 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "iotadb"
+name = "sangdb"
 version = "0.1.0"
 
 [[patch.unused]]
