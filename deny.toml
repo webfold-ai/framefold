@@ -63,7 +63,7 @@ ignore = true
 
 [bans]
 # Banned crates — keep this list SHORT. The Ptyktos substrate (memoryfold,
-# hashtrinity, apeiron, kleis, sangdb, modelfold, verdict, guardfold,
+# hashtrinity, apeiron, kleis, iotadb, modelfold, verdict, guardfold,
 # telos, sangsec) is a path-dep stack, not a crates.io dep. Anything else
 # pulled from crates.io must have a justified reason.
 multiple-versions = "warn"

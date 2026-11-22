@@ -9,7 +9,7 @@ header = """
 # Ptyktos-coding-agent
 
 Ptyktos-native fork of pi-coding-agent / oh-my-pi (omp.sh) — Rust core +
-TS extensions on apeiron / hashtrinity / memoryfold / kleis / sangdb /
+TS extensions on apeiron / hashtrinity / memoryfold / kleis / iotadb /
 modelfold / verdict / guardfold / telos / sangsec substrate. Replaces
 SQLite memory, git-checkpoint, tool-gate, event-bus, ontology projection.
 """
